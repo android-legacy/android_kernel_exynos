@@ -45,7 +45,7 @@
 #include <plat/fimc-core.h>
 #include <plat/iic-core.h>
 #include <plat/tv-core.h>
-#include <plat/ace-core.h>
+#include <plat/spi-core.h>
 #include <plat/regs-serial.h>
 
 #include "common.h"
@@ -423,6 +423,8 @@ static void __init exynos4_map_io(void)
 
 	s5p_fb_setname(0, "exynos4-fb");
 	s5p_hdmi_setname("exynos4-hdmi");
+
+	s3c64xx_spi_setname("exynos4210-spi");
 }
 
 static void __init exynos5_map_io(void)
@@ -447,12 +449,7 @@ static void __init exynos5_map_io(void)
 	s3c_i2c1_setname("s3c2440-i2c");
 	s3c_i2c2_setname("s3c2440-i2c");
 
-	s5p_fb_setname(1, "exynos5-fb");
-	s5p_hdmi_setname("exynos5-hdmi");
-
-#ifdef CONFIG_S5P_DEV_ACE
-	s5p_ace_setname("exynos4-ace");
-#endif
+	s3c64xx_spi_setname("exynos4210-spi");
 }
 
 static void __init exynos4_init_clocks(int xtal)

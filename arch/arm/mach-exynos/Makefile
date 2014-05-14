@@ -119,9 +119,40 @@ obj-$(CONFIG_EXYNOS4_SETUP_KEYPAD)	+= setup-keypad.o
 obj-$(CONFIG_EXYNOS4_SETUP_MFC)		+= setup-mfc.o
 obj-$(CONFIG_EXYNOS4_SETUP_SDHCI_GPIO)	+= setup-sdhci-gpio.o
 obj-$(CONFIG_EXYNOS4_SETUP_USB_PHY)	+= setup-usb-phy.o
-obj-$(CONFIG_EXYNOS_SETUP_SPI)		+= setup-spi.o
-obj-$(CONFIG_EXYNOS5_SETUP_TVOUT)	+= setup-tvout.o
-obj-$(CONFIG_EXYNOS_SETUP_ADC)		+= setup-adc.o
+obj-$(CONFIG_EXYNOS4_SETUP_FB_S5P)	+= setup-fb-s5p.o
+obj-$(CONFIG_EXYNOS4_SETUP_TVOUT)	+= setup-tvout.o
+obj-$(CONFIG_EXYNOS4_SETUP_JPEG)	+= setup-jpeg.o
+obj-$(CONFIG_EXYNOS4_SETUP_THERMAL)	+= tmu.o
+obj-$(CONFIG_EXYNOS_SETUP_THERMAL)	+= tmu_exynos.o
+obj-$(CONFIG_EXYNOS4_SETUP_MIPI_DSI)	+= setup-dsim.o
+obj-$(CONFIG_EXYNOS4_SETUP_MIPI_DSIM)	+= setup-mipidsim.o
+obj-$(CONFIG_EXYNOS_CONTENT_PATH_PROTECTION) += secmem-allocdev.o
+obj-$(CONFIG_EXYNOS_C2C)		+= setup-c2c.o
+obj-$(CONFIG_SEC_MODEM_M0_C2C)		+= board-midas-modems.o
+ifeq ($(CONFIG_MACH_P4NOTE),y)
+obj-$(CONFIG_SEC_MODEM_M0)		+= board-p4notepq-modems.o
+else
+obj-$(CONFIG_SEC_MODEM_M0)		+= board-m0-modems.o
+endif
+obj-$(CONFIG_SEC_MODEM_M0_TD)           += board-m0-td-modems.o
+obj-$(CONFIG_SEC_MODEM_M0_CTC)		+= board-m0ctc-modems.o
+#obj-$(CONFIG_SEC_MODEM_M1)		+= board-m1-modems.o
+obj-$(CONFIG_SEC_MODEM_GAIA)		+= board-gaia-modems.o
+obj-$(CONFIG_SEC_MODEM_M1)		+= board-c1-modems.o
+obj-$(CONFIG_SEC_MODEM_C1)		+= board-c1-modems.o
+obj-$(CONFIG_SEC_MODEM_C1_VZW)		+= board-c1vzw-modems.o
+obj-$(CONFIG_SEC_MODEM_C1_LGT)		+= board-c1lgt-modems.o
+obj-$(CONFIG_SEC_MODEM_C1_CTC)		+= board-c1ctc-modems.o
+obj-$(CONFIG_SEC_MODEM_U1)		+= board-u1-modems.o
+obj-$(CONFIG_SEC_MODEM_U1_SPR)		+= board-u1-spr-modems.o
+obj-$(CONFIG_SEC_MODEM_U1_LGT)		+= board-u1-lgt-modems.o
+obj-$(CONFIG_SEC_DEBUG)			+= sec_debug.o sec_getlog.o sec_gaf.o
+obj-$(CONFIG_SEC_WATCHDOG_RESET)	+= sec_watchdog.o
+obj-$(CONFIG_SEC_LOG)			+= sec_log.o
+obj-$(CONFIG_EXYNOS5_DEV_BTS)		+= bts.o
+
+obj-$(CONFIG_WAKEUP_ASSIST)		+= wakeup_assist.o
+obj-$(CONFIG_BT_CSR8811)		+= board-bluetooth-csr8811.o
 obj-$(CONFIG_ION_EXYNOS)		+= dev-ion.o
 obj-$(CONFIG_CMA)			+= reserve-mem.o
 obj-$(CONFIG_EXYNOS5_SETUP_JPEG)			+= setup-jpeg.o

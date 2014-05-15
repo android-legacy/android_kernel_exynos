@@ -221,7 +221,7 @@ static void wm831x_ts_input_close(struct input_dev *idev)
 	synchronize_irq(wm831x_ts->pd_irq);
 
 	/* Make sure the IRQ completion work is quiesced */
-	flush_work_sync(&wm831x_ts->pd_data_work);
+	flush_work(&wm831x_ts->pd_data_work);
 
 	/* If we ended up with the pen down then make sure we revert back
 	 * to pen detection state for the next time we start up.
@@ -401,7 +401,18 @@ static struct platform_driver wm831x_ts_driver = {
 	.probe = wm831x_ts_probe,
 	.remove = __devexit_p(wm831x_ts_remove),
 };
-module_platform_driver(wm831x_ts_driver);
+
+static int __init wm831x_ts_init(void)
+{
+	return platform_driver_register(&wm831x_ts_driver);
+}
+module_init(wm831x_ts_init);
+
+static void __exit wm831x_ts_exit(void)
+{
+	platform_driver_unregister(&wm831x_ts_driver);
+}
+module_exit(wm831x_ts_exit);
 
 /* Module information */
 MODULE_AUTHOR("Mark Brown <broonie@opensource.wolfsonmicro.com>");

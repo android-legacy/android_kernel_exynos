@@ -125,12 +125,12 @@ static struct davinci_i2c_platform_data davinci_i2c_platform_data_default = {
 static inline void davinci_i2c_write_reg(struct davinci_i2c_dev *i2c_dev,
 					 int reg, u16 val)
 {
-	__raw_writew(val, i2c_dev->base + reg);
+	writew_relaxed(val, i2c_dev->base + reg);
 }
 
 static inline u16 davinci_i2c_read_reg(struct davinci_i2c_dev *i2c_dev, int reg)
 {
-	return __raw_readw(i2c_dev->base + reg);
+	return readw_relaxed(i2c_dev->base + reg);
 }
 
 /* Generate a pulse on the i2c clock pin. */
@@ -328,7 +328,7 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 
 	davinci_i2c_write_reg(dev, DAVINCI_I2C_CNT_REG, dev->buf_len);
 
-	INIT_COMPLETION(dev->cmd_complete);
+	reinit_completion(&dev->cmd_complete);
 	dev->cmd_err = 0;
 
 	/* Take I2C out of reset and configure it as master */

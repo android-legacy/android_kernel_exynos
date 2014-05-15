@@ -1,6 +1,6 @@
 /*
  * lm92 - Hardware monitoring driver
- * Copyright (C) 2005-2008  Jean Delvare <khali@linux-fr.org>
+ * Copyright (C) 2005-2008  Jean Delvare <jdelvare@suse.de>
  *
  * Based on the lm90 driver, with some ideas taken from the lm_sensors
  * lm92 driver as well.
@@ -48,6 +48,7 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/err.h>
 #include <linux/mutex.h>
+#include <linux/jiffies.h>
 
 /*
  * The LM92 and MAX6635 have 2 two-state pins for address selection,
@@ -373,11 +374,10 @@ static int lm92_probe(struct i2c_client *new_client,
 	struct lm92_data *data;
 	int err;
 
-	data = kzalloc(sizeof(struct lm92_data), GFP_KERNEL);
-	if (!data) {
-		err = -ENOMEM;
-		goto exit;
-	}
+	data = devm_kzalloc(&new_client->dev, sizeof(struct lm92_data),
+			    GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
 
 	i2c_set_clientdata(new_client, data);
 	data->valid = 0;
@@ -389,7 +389,7 @@ static int lm92_probe(struct i2c_client *new_client,
 	/* Register sysfs hooks */
 	err = sysfs_create_group(&new_client->dev.kobj, &lm92_group);
 	if (err)
-		goto exit_free;
+		return err;
 
 	data->hwmon_dev = hwmon_device_register(&new_client->dev);
 	if (IS_ERR(data->hwmon_dev)) {
@@ -401,9 +401,6 @@ static int lm92_probe(struct i2c_client *new_client,
 
 exit_remove:
 	sysfs_remove_group(&new_client->dev.kobj, &lm92_group);
-exit_free:
-	kfree(data);
-exit:
 	return err;
 }
 
@@ -414,7 +411,6 @@ static int lm92_remove(struct i2c_client *client)
 	hwmon_device_unregister(data->hwmon_dev);
 	sysfs_remove_group(&client->dev.kobj, &lm92_group);
 
-	kfree(data);
 	return 0;
 }
 
@@ -444,6 +440,6 @@ static struct i2c_driver lm92_driver = {
 
 module_i2c_driver(lm92_driver);
 
-MODULE_AUTHOR("Jean Delvare <khali@linux-fr.org>");
+MODULE_AUTHOR("Jean Delvare <jdelvare@suse.de>");
 MODULE_DESCRIPTION("LM92/MAX6635 driver");
 MODULE_LICENSE("GPL");

@@ -41,6 +41,7 @@
 #include <linux/skbuff.h>
 #include <net/netlabel.h>
 #include <net/request_sock.h>
+#include <asm/unaligned.h>
 #include <linux/atomic.h>
 #include <asm/unaligned.h>
 

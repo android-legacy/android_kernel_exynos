@@ -13,11 +13,11 @@
 
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/module.h>
 #include <linux/acpi.h>
 #include <linux/mfd/core.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
-#include <linux/module.h>
 
 static struct device_type mfd_dev_type = {
 	.name	= "mfd_device",
@@ -61,7 +61,8 @@ int mfd_cell_disable(struct platform_device *pdev)
 EXPORT_SYMBOL(mfd_cell_disable);
 
 static int mfd_platform_add_cell(struct platform_device *pdev,
-				 const struct mfd_cell *cell)
+				 const struct mfd_cell *cell,
+				 atomic_t *usage_count)
 {
 	if (!cell)
 		return 0;
@@ -70,11 +71,12 @@ static int mfd_platform_add_cell(struct platform_device *pdev,
 	if (!pdev->mfd_cell)
 		return -ENOMEM;
 
+	pdev->mfd_cell->usage_count = usage_count;
 	return 0;
 }
 
 static int mfd_add_device(struct device *parent, int id,
-			  const struct mfd_cell *cell,
+			  const struct mfd_cell *cell, atomic_t *usage_count,
 			  struct resource *mem_base,
 			  int irq_base)
 {
@@ -101,7 +103,7 @@ static int mfd_add_device(struct device *parent, int id,
 			goto fail_res;
 	}
 
-	ret = mfd_platform_add_cell(pdev, cell);
+	ret = mfd_platform_add_cell(pdev, cell, usage_count);
 	if (ret)
 		goto fail_res;
 
@@ -158,30 +160,34 @@ fail_alloc:
 }
 
 int mfd_add_devices(struct device *parent, int id,
-		    struct mfd_cell *cells, int n_devs,
+		    const struct mfd_cell *cells, int n_devs,
 		    struct resource *mem_base,
 		    int irq_base)
 {
 	int i;
-	int ret = 0;
+	int ret;
 	atomic_t *cnts;
 
 	/* initialize reference counting for all cells */
-	cnts = kcalloc(n_devs, sizeof(*cnts), GFP_KERNEL);
+	cnts = kcalloc(sizeof(*cnts), n_devs, GFP_KERNEL);
 	if (!cnts)
 		return -ENOMEM;
 
 	for (i = 0; i < n_devs; i++) {
 		atomic_set(&cnts[i], 0);
-		cells[i].usage_count = &cnts[i];
-		ret = mfd_add_device(parent, id, cells + i, mem_base, irq_base);
+		ret = mfd_add_device(parent, id, cells + i, cnts + i, mem_base,
+				     irq_base);
 		if (ret)
-			break;
+			goto fail;
 	}
 
-	if (ret)
-		mfd_remove_devices(parent);
+	return 0;
 
+fail:
+	if (i)
+		mfd_remove_devices(parent);
+	else
+		kfree(cnts);
 	return ret;
 }
 EXPORT_SYMBOL(mfd_add_devices);
@@ -236,7 +242,8 @@ int mfd_clone_cell(const char *cell, const char **clones, size_t n_clones)
 	for (i = 0; i < n_clones; i++) {
 		cell_entry.name = clones[i];
 		/* don't give up if a single call fails; just report error */
-		if (mfd_add_device(pdev->dev.parent, -1, &cell_entry, NULL, 0))
+		if (mfd_add_device(pdev->dev.parent, -1, &cell_entry,
+				   cell_entry.usage_count, NULL, 0))
 			dev_err(dev, "failed to create platform device '%s'\n",
 					clones[i]);
 	}

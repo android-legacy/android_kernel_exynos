@@ -41,10 +41,8 @@ static int cfdbgl_transmit(struct cflayer *layr, struct cfpkt *pkt)
 	struct caif_payload_info *info;
 	int ret;
 
-	if (!cfsrvl_ready(service, &ret)) {
-		cfpkt_destroy(pkt);
+	if (!cfsrvl_ready(service, &ret))
 		return ret;
-	}
 
 	/* Add info for MUX-layer to route the packet out */
 	info = cfpkt_info(pkt);

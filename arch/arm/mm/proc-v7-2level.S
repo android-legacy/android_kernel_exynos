@@ -53,8 +53,6 @@ ENTRY(cpu_v7_switch_mm)
 #endif
 #ifdef CONFIG_ARM_ERRATA_754322
 	dsb
-#elif CONFIG_ARM_ERRATA_766421
-	dmb
 #endif
 	mcr	p15, 0, r1, c13, c0, 1		@ set context ID
 	isb
@@ -102,13 +100,18 @@ ENTRY(cpu_v7_set_pte_ext)
 	orrne	r3, r3, #PTE_EXT_XN
 
 	tst	r1, #L_PTE_YOUNG
-	tstne	r1, #L_PTE_PRESENT
+	tstne	r1, #L_PTE_VALID
+#ifndef CONFIG_CPU_USE_DOMAINS
+	eorne	r1, r1, #L_PTE_NONE
+	tstne	r1, #L_PTE_NONE
+#endif
 	moveq	r3, #0
 
  ARM(	str	r3, [r0, #2048]! )
  THUMB(	add	r0, r0, #2048 )
  THUMB(	str	r3, [r0] )
-	mcr	p15, 0, r0, c7, c10, 1		@ flush_pte
+	ALT_SMP(mov	pc,lr)
+	ALT_UP (mcr	p15, 0, r0, c7, c10, 1)		@ flush_pte
 #endif
 	mov	pc, lr
 ENDPROC(cpu_v7_set_pte_ext)

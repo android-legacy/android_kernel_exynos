@@ -60,6 +60,12 @@ struct tp_module {
 	unsigned int num_tracepoints;
 	struct tracepoint * const *tracepoints_ptrs;
 };
+bool trace_module_has_bad_taint(struct module *mod);
+#else
+static inline bool trace_module_has_bad_taint(struct module *mod)
+{
+	return false;
+}
 #endif /* CONFIG_MODULES */
 
 struct tracepoint_iter {
@@ -114,7 +120,7 @@ static inline void tracepoint_synchronize_unregister(void)
  * as "(void *, void)". The DECLARE_TRACE_NOARGS() will pass in just
  * "void *data", where as the DECLARE_TRACE() will pass in "void *data, proto".
  */
-#define __DO_TRACE(tp, proto, args, cond, prercu, postrcu)		\
+#define __DO_TRACE(tp, proto, args, cond)				\
 	do {								\
 		struct tracepoint_func *it_func_ptr;			\
 		void *it_func;						\
@@ -122,7 +128,6 @@ static inline void tracepoint_synchronize_unregister(void)
 									\
 		if (!(cond))						\
 			return;						\
-		prercu;							\
 		rcu_read_lock_sched_notrace();				\
 		it_func_ptr = rcu_dereference_sched((tp)->funcs);	\
 		if (it_func_ptr) {					\
@@ -133,7 +138,6 @@ static inline void tracepoint_synchronize_unregister(void)
 			} while ((++it_func_ptr)->func);		\
 		}							\
 		rcu_read_unlock_sched_notrace();			\
-		postrcu;						\
 	} while (0)
 
 /*
@@ -141,7 +145,7 @@ static inline void tracepoint_synchronize_unregister(void)
  * not add unwanted padding between the beginning of the section and the
  * structure. Force alignment to the same alignment as the section start.
  */
-#define __DECLARE_TRACE(name, proto, args, cond, data_proto, data_args) \
+#define __DECLARE_TRACE(name, proto, args, cond, data_proto, data_args)	\
 	extern struct tracepoint __tracepoint_##name;			\
 	static inline void trace_##name(proto)				\
 	{								\
@@ -149,17 +153,7 @@ static inline void tracepoint_synchronize_unregister(void)
 			__DO_TRACE(&__tracepoint_##name,		\
 				TP_PROTO(data_proto),			\
 				TP_ARGS(data_args),			\
-				TP_CONDITION(cond),,);			\
-	}								\
-	static inline void trace_##name##_rcuidle(proto)		\
-	{								\
-		if (static_branch(&__tracepoint_##name.key))		\
-			__DO_TRACE(&__tracepoint_##name,		\
-				TP_PROTO(data_proto),			\
-				TP_ARGS(data_args),			\
-				TP_CONDITION(cond),			\
-				rcu_idle_exit(),			\
-				rcu_idle_enter());			\
+				TP_CONDITION(cond));			\
 	}								\
 	static inline int						\
 	register_trace_##name(void (*probe)(data_proto), void *data)	\
@@ -202,10 +196,8 @@ static inline void tracepoint_synchronize_unregister(void)
 	EXPORT_SYMBOL(__tracepoint_##name)
 
 #else /* !CONFIG_TRACEPOINTS */
-#define __DECLARE_TRACE(name, proto, args, cond, data_proto, data_args) \
+#define __DECLARE_TRACE(name, proto, args, cond, data_proto, data_args)	\
 	static inline void trace_##name(proto)				\
-	{ }								\
-	static inline void trace_##name##_rcuidle(proto)		\
 	{ }								\
 	static inline int						\
 	register_trace_##name(void (*probe)(data_proto),		\
@@ -258,6 +250,8 @@ static inline void tracepoint_synchronize_unregister(void)
 			PARAMS(__data, args))
 
 #define TRACE_EVENT_FLAGS(event, flag)
+
+#define TRACE_EVENT_PERF_PERM(event, expr...)
 
 #endif /* DECLARE_TRACE */
 
@@ -388,5 +382,7 @@ static inline void tracepoint_synchronize_unregister(void)
 				PARAMS(args), PARAMS(cond))
 
 #define TRACE_EVENT_FLAGS(event, flag)
+
+#define TRACE_EVENT_PERF_PERM(event, expr...)
 
 #endif /* ifdef TRACE_EVENT (see note above) */

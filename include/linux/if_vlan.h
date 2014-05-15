@@ -74,8 +74,6 @@ static inline struct vlan_ethhdr *vlan_eth_hdr(const struct sk_buff *skb)
 /* found in socket.c */
 extern void vlan_ioctl_set(int (*hook)(struct net *, void __user *));
 
-struct vlan_info;
-
 static inline int is_vlan_dev(struct net_device *dev)
 {
         return dev->priv_flags & IFF_802_1Q_VLAN;
@@ -103,6 +101,8 @@ extern int vlan_vids_add_by_dev(struct net_device *dev,
 				const struct net_device *by_dev);
 extern void vlan_vids_del_by_dev(struct net_device *dev,
 				 const struct net_device *by_dev);
+
+extern bool vlan_uses_dev(const struct net_device *dev);
 #else
 static inline struct net_device *
 __vlan_find_dev_deep(struct net_device *real_dev, u16 vlan_id)
@@ -150,6 +150,11 @@ static inline int vlan_vids_add_by_dev(struct net_device *dev,
 static inline void vlan_vids_del_by_dev(struct net_device *dev,
 					const struct net_device *by_dev)
 {
+}
+
+static inline bool vlan_uses_dev(const struct net_device *dev)
+{
+	return false;
 }
 #endif
 
@@ -327,7 +332,7 @@ static inline void vlan_set_encap_proto(struct sk_buff *skb,
 					struct vlan_hdr *vhdr)
 {
 	__be16 proto;
-	unsigned short *rawp;
+	unsigned char *rawp;
 
 	/*
 	 * Was a VLAN packet, grab the encapsulated protocol, which the layer
@@ -340,8 +345,8 @@ static inline void vlan_set_encap_proto(struct sk_buff *skb,
 		return;
 	}
 
-	rawp = (unsigned short *)(vhdr + 1);
-	if (*rawp == 0xFFFF)
+	rawp = skb->data;
+	if (*(unsigned short *) rawp == 0xFFFF)
 		/*
 		 * This is a magic hack to spot IPX packets. Older Novell
 		 * breaks the protocol design and runs IPX over 802.3 without

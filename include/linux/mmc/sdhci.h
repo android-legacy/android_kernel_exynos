@@ -8,8 +8,8 @@
  * the Free Software Foundation; either version 2 of the License, or (at
  * your option) any later version.
  */
-#ifndef LINUX_MMC_SDHCI_H
-#define LINUX_MMC_SDHCI_H
+#ifndef __SDHCI_H
+#define __SDHCI_H
 
 #include <linux/scatterlist.h>
 #include <linux/compiler.h>
@@ -91,13 +91,19 @@ struct sdhci_host {
 	unsigned int quirks2;	/* More deviations from spec. */
 
 #define SDHCI_QUIRK2_HOST_OFF_CARD_ON			(1<<0)
+#define SDHCI_QUIRK2_HOST_NO_CMD23			(1<<1)
+/* The system physically doesn't support 1.8v, even if the host does */
+#define SDHCI_QUIRK2_NO_1_8_V				(1<<2)
+#define SDHCI_QUIRK2_PRESET_VALUE_BROKEN		(1<<3)
 
 	int irq;		/* Device IRQ */
 	void __iomem *ioaddr;	/* Mapped address */
 
 	const struct sdhci_ops *ops;	/* Low level hw interface */
 
-	struct regulator *vmmc;	/* Power regulator */
+	char *vmmc_name;	/* Power regulator's name */
+	struct regulator *vmmc;		/* Power regulator (vmmc) */
+	struct regulator *vqmmc;	/* Signaling regulator (vccq) */
 
 	/* Internal data */
 	struct mmc_host *mmc;	/* MMC structure */
@@ -122,6 +128,7 @@ struct sdhci_host {
 #define SDHCI_PV_ENABLED	(1<<8)	/* Preset value enabled */
 #define SDHCI_SDIO_IRQ_ENABLED	(1<<9)	/* SDIO irq enabled */
 #define SDHCI_HS200_NEEDS_TUNING (1<<10)	/* HS200 needs tuning */
+#define SDHCI_USING_RETUNING_TIMER (1<<11)	/* Host is using a retuning timer for the card */
 
 	unsigned int version;	/* SDHCI spec. version */
 
@@ -155,7 +162,8 @@ struct sdhci_host {
 
 	struct timer_list timer;	/* Timer for timeouts */
 
-	unsigned int caps;	/* Alternative capabilities */
+	unsigned int caps;	/* Alternative CAPABILITY_0 */
+	unsigned int caps1;	/* Alternative CAPABILITY_1 */
 
 	unsigned int            ocr_avail_sdio;	/* OCR bit masks */
 	unsigned int            ocr_avail_sd;
@@ -171,4 +179,4 @@ struct sdhci_host {
 
 	unsigned long private[0] ____cacheline_aligned;
 };
-#endif /* LINUX_MMC_SDHCI_H */
+#endif /* __SDHCI_H */

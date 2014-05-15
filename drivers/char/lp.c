@@ -294,7 +294,7 @@ static int lp_wait_ready(int minor, int nonblock)
 static ssize_t lp_write(struct file * file, const char __user * buf,
 		        size_t count, loff_t *ppos)
 {
-	unsigned int minor = iminor(file->f_path.dentry->d_inode);
+	unsigned int minor = iminor(file_inode(file));
 	struct parport *port = lp_table[minor].dev->port;
 	char *kbuf = lp_table[minor].lp_buffer;
 	ssize_t retv = 0;
@@ -413,7 +413,7 @@ static ssize_t lp_read(struct file * file, char __user * buf,
 		       size_t count, loff_t *ppos)
 {
 	DEFINE_WAIT(wait);
-	unsigned int minor=iminor(file->f_path.dentry->d_inode);
+	unsigned int minor=iminor(file_inode(file));
 	struct parport *port = lp_table[minor].dev->port;
 	ssize_t retval = 0;
 	char *kbuf = lp_table[minor].lp_buffer;
@@ -679,7 +679,7 @@ static long lp_ioctl(struct file *file, unsigned int cmd,
 	struct timeval par_timeout;
 	int ret;
 
-	minor = iminor(file->f_path.dentry->d_inode);
+	minor = iminor(file_inode(file));
 	mutex_lock(&lp_mutex);
 	switch (cmd) {
 	case LPSETTIMEOUT:
@@ -705,13 +705,16 @@ static long lp_compat_ioctl(struct file *file, unsigned int cmd,
 {
 	unsigned int minor;
 	struct timeval par_timeout;
+	struct compat_timeval __user *tc;
 	int ret;
 
-	minor = iminor(file->f_path.dentry->d_inode);
+	minor = iminor(file_inode(file));
 	mutex_lock(&lp_mutex);
 	switch (cmd) {
 	case LPSETTIMEOUT:
-		if (compat_get_timeval(&par_timeout, compat_ptr(arg))) {
+		tc = compat_ptr(arg);
+		if (get_user(par_timeout.tv_sec, &tc->tv_sec) ||
+		    get_user(par_timeout.tv_usec, &tc->tv_usec)) {
 			ret = -EFAULT;
 			break;
 		}

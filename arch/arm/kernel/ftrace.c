@@ -13,17 +13,15 @@
  */
 
 #include <linux/ftrace.h>
-#include <linux/module.h>
 #include <linux/uaccess.h>
 
 #include <asm/cacheflush.h>
-#include <asm/opcodes.h>
 #include <asm/ftrace.h>
 
 #include "insn.h"
 
 #ifdef CONFIG_THUMB2_KERNEL
-#define	NOP		0xf85deb04	/* pop.w {lr} */
+#define	NOP		0xeb04f85d	/* pop.w {lr} */
 #else
 #define	NOP		0xe8bd4000	/* pop {lr} */
 #endif
@@ -64,45 +62,21 @@ static unsigned long adjust_address(struct dyn_ftrace *rec, unsigned long addr)
 }
 #endif
 
-int ftrace_arch_code_modify_prepare(void)
-{
-	set_kernel_text_rw();
-	set_all_modules_text_rw();
-	return 0;
-}
-
-int ftrace_arch_code_modify_post_process(void)
-{
-	set_all_modules_text_ro();
-	set_kernel_text_ro();
-	return 0;
-}
-
 static unsigned long ftrace_call_replace(unsigned long pc, unsigned long addr)
 {
 	return arm_gen_branch_link(pc, addr);
 }
 
 static int ftrace_modify_code(unsigned long pc, unsigned long old,
-			      unsigned long new, bool validate)
+			      unsigned long new)
 {
 	unsigned long replaced;
 
-	if (IS_ENABLED(CONFIG_THUMB2_KERNEL)) {
-		old = __opcode_to_mem_thumb32(old);
-		new = __opcode_to_mem_thumb32(new);
-	} else {
-		old = __opcode_to_mem_arm(old);
-		new = __opcode_to_mem_arm(new);
-	}
+	if (probe_kernel_read(&replaced, (void *)pc, MCOUNT_INSN_SIZE))
+		return -EFAULT;
 
-	if (validate) {
-		if (probe_kernel_read(&replaced, (void *)pc, MCOUNT_INSN_SIZE))
-			return -EFAULT;
-
-		if (replaced != old)
-			return -EINVAL;
-	}
+	if (replaced != old)
+		return -EINVAL;
 
 	if (probe_kernel_write((void *)pc, &new, MCOUNT_INSN_SIZE))
 		return -EPERM;
@@ -114,21 +88,23 @@ static int ftrace_modify_code(unsigned long pc, unsigned long old,
 
 int ftrace_update_ftrace_func(ftrace_func_t func)
 {
-	unsigned long pc;
+	unsigned long pc, old;
 	unsigned long new;
 	int ret;
 
 	pc = (unsigned long)&ftrace_call;
+	memcpy(&old, &ftrace_call, MCOUNT_INSN_SIZE);
 	new = ftrace_call_replace(pc, (unsigned long)func);
 
-	ret = ftrace_modify_code(pc, 0, new, false);
+	ret = ftrace_modify_code(pc, old, new);
 
 #ifdef CONFIG_OLD_MCOUNT
 	if (!ret) {
 		pc = (unsigned long)&ftrace_call_old;
+		memcpy(&old, &ftrace_call_old, MCOUNT_INSN_SIZE);
 		new = ftrace_call_replace(pc, (unsigned long)func);
 
-		ret = ftrace_modify_code(pc, 0, new, false);
+		ret = ftrace_modify_code(pc, old, new);
 	}
 #endif
 
@@ -143,7 +119,7 @@ int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	old = ftrace_nop_replace(rec);
 	new = ftrace_call_replace(ip, adjust_address(rec, addr));
 
-	return ftrace_modify_code(rec->ip, old, new, true);
+	return ftrace_modify_code(rec->ip, old, new);
 }
 
 int ftrace_make_nop(struct module *mod,
@@ -156,7 +132,7 @@ int ftrace_make_nop(struct module *mod,
 
 	old = ftrace_call_replace(ip, adjust_address(rec, addr));
 	new = ftrace_nop_replace(rec);
-	ret = ftrace_modify_code(ip, old, new, true);
+	ret = ftrace_modify_code(ip, old, new);
 
 #ifdef CONFIG_OLD_MCOUNT
 	if (ret == -EINVAL && addr == MCOUNT_ADDR) {
@@ -164,7 +140,7 @@ int ftrace_make_nop(struct module *mod,
 
 		old = ftrace_call_replace(ip, adjust_address(rec, addr));
 		new = ftrace_nop_replace(rec);
-		ret = ftrace_modify_code(ip, old, new, true);
+		ret = ftrace_modify_code(ip, old, new);
 	}
 #endif
 
@@ -194,20 +170,19 @@ void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr,
 	old = *parent;
 	*parent = return_hooker;
 
-	trace.func = self_addr;
-	trace.depth = current->curr_ret_stack + 1;
-
-	/* Only trace if the calling function expects to */
-	if (!ftrace_graph_entry(&trace)) {
-		*parent = old;
-		return;
-	}
-
 	err = ftrace_push_return_trace(old, self_addr, &trace.depth,
 				       frame_pointer);
 	if (err == -EBUSY) {
 		*parent = old;
 		return;
+	}
+
+	trace.func = self_addr;
+
+	/* Only trace if the calling function expects to */
+	if (!ftrace_graph_entry(&trace)) {
+		current->curr_ret_stack--;
+		*parent = old;
 	}
 }
 
@@ -226,7 +201,7 @@ static int __ftrace_modify_caller(unsigned long *callsite,
 	unsigned long old = enable ? nop : branch;
 	unsigned long new = enable ? branch : nop;
 
-	return ftrace_modify_code(pc, old, new, true);
+	return ftrace_modify_code(pc, old, new);
 }
 
 static int ftrace_modify_graph_caller(bool enable)

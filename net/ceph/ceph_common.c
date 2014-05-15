@@ -17,6 +17,7 @@
 #include <linux/string.h>
 
 
+#include <linux/ceph/ceph_features.h>
 #include <linux/ceph/libceph.h>
 #include <linux/ceph/debugfs.h>
 #include <linux/ceph/decode.h>
@@ -304,6 +305,7 @@ ceph_parse_options(char *options, const char *dev_name,
 
 	/* start with defaults */
 	opt->flags = CEPH_OPT_DEFAULT;
+	opt->osd_timeout = CEPH_OSD_TIMEOUT_DEFAULT;
 	opt->osd_keepalive_timeout = CEPH_OSD_KEEPALIVE_DEFAULT;
 	opt->mount_timeout = CEPH_MOUNT_TIMEOUT_DEFAULT; /* seconds */
 	opt->osd_idle_ttl = CEPH_OSD_IDLE_TTL_DEFAULT;   /* seconds */
@@ -389,7 +391,7 @@ ceph_parse_options(char *options, const char *dev_name,
 
 			/* misc */
 		case Opt_osdtimeout:
-			pr_warning("ignoring deprecated osdtimeout option\n");
+			opt->osd_timeout = intval;
 			break;
 		case Opt_osdkeepalivetimeout:
 			opt->osd_keepalive_timeout = intval;
@@ -439,8 +441,8 @@ EXPORT_SYMBOL(ceph_client_id);
  * create a fresh client instance
  */
 struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private,
-				       unsigned supported_features,
-				       unsigned required_features)
+				       unsigned int supported_features,
+				       unsigned int required_features)
 {
 	struct ceph_client *client;
 	struct ceph_entity_addr *myaddr = NULL;
@@ -458,9 +460,9 @@ struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private,
 	client->auth_err = 0;
 
 	client->extra_mon_dispatch = NULL;
-	client->supported_features = CEPH_FEATURE_SUPPORTED_DEFAULT |
+	client->supported_features = CEPH_FEATURES_SUPPORTED_DEFAULT |
 		supported_features;
-	client->required_features = CEPH_FEATURE_REQUIRED_DEFAULT |
+	client->required_features = CEPH_FEATURES_REQUIRED_DEFAULT |
 		required_features;
 
 	/* msgr */

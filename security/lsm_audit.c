@@ -213,12 +213,15 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 {
 	struct task_struct *tsk = current;
 
-	if (a->tsk)
-		tsk = a->tsk;
-	if (tsk && tsk->pid) {
-		audit_log_format(ab, " pid=%d comm=", tsk->pid);
-		audit_log_untrustedstring(ab, tsk->comm);
-	}
+	/*
+	 * To keep stack sizes in check force programers to notice if they
+	 * start making this union too large!  See struct lsm_network_audit
+	 * as an example of how to deal with large data.
+	 */
+	BUILD_BUG_ON(sizeof(a->u) > sizeof(void *)*2);
+
+	audit_log_format(ab, " pid=%d comm=", tsk->pid);
+	audit_log_untrustedstring(ab, tsk->comm);
 
 	switch (a->type) {
 	case LSM_AUDIT_DATA_NONE:
@@ -393,7 +396,8 @@ void common_lsm_audit(struct common_audit_data *a,
 	if (a == NULL)
 		return;
 	/* we use GFP_ATOMIC so we won't sleep */
-	ab = audit_log_start(current->audit_context, GFP_ATOMIC, AUDIT_AVC);
+	ab = audit_log_start(current->audit_context, GFP_ATOMIC | __GFP_NOWARN,
+			     AUDIT_AVC);
 
 	if (ab == NULL)
 		return;

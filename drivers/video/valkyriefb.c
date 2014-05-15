@@ -56,7 +56,6 @@
 #include <linux/cuda.h>
 #include <asm/io.h>
 #ifdef CONFIG_MAC
-#include <asm/bootinfo.h>
 #include <asm/macintosh.h>
 #else
 #include <asm/prom.h>
@@ -555,7 +554,7 @@ static int __init valkyrie_init_info(struct fb_info *info,
 
 
 /*
- * Parse user specified options (`video=valkyriefb:')
+ * Parse user speficied options (`video=valkyriefb:')
  */
 int __init valkyriefb_setup(char *options)
 {

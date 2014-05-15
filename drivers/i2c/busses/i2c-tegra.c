@@ -26,8 +26,6 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/i2c-tegra.h>
-#include <linux/of_i2c.h>
-#include <linux/module.h>
 
 #include <asm/unaligned.h>
 
@@ -401,6 +399,8 @@ static irqreturn_t tegra_i2c_isr(int irq, void *dev_id)
 			disable_irq_nosync(i2c_dev->irq);
 			i2c_dev->irq_disabled = 1;
 		}
+
+		complete(&i2c_dev->msg_complete);
 		goto err;
 	}
 
@@ -409,6 +409,7 @@ static irqreturn_t tegra_i2c_isr(int irq, void *dev_id)
 			i2c_dev->msg_err |= I2C_ERR_NO_ACK;
 		if (status & I2C_INT_ARBITRATION_LOST)
 			i2c_dev->msg_err |= I2C_ERR_ARBITRATION_LOST;
+		complete(&i2c_dev->msg_complete);
 		goto err;
 	}
 
@@ -426,14 +427,14 @@ static irqreturn_t tegra_i2c_isr(int irq, void *dev_id)
 			tegra_i2c_mask_irq(i2c_dev, I2C_INT_TX_FIFO_DATA_REQ);
 	}
 
-	i2c_writel(i2c_dev, status, I2C_INT_STATUS);
-	if (i2c_dev->is_dvc)
-		dvc_writel(i2c_dev, DVC_STATUS_I2C_DONE_INTR, DVC_STATUS);
-
 	if (status & I2C_INT_PACKET_XFER_COMPLETE) {
 		BUG_ON(i2c_dev->msg_buf_remaining);
 		complete(&i2c_dev->msg_complete);
 	}
+
+	i2c_writel(i2c_dev, status, I2C_INT_STATUS);
+	if (i2c_dev->is_dvc)
+		dvc_writel(i2c_dev, DVC_STATUS_I2C_DONE_INTR, DVC_STATUS);
 	return IRQ_HANDLED;
 err:
 	/* An error occurred, mask all interrupts */
@@ -443,8 +444,6 @@ err:
 	i2c_writel(i2c_dev, status, I2C_INT_STATUS);
 	if (i2c_dev->is_dvc)
 		dvc_writel(i2c_dev, DVC_STATUS_I2C_DONE_INTR, DVC_STATUS);
-
-	complete(&i2c_dev->msg_complete);
 	return IRQ_HANDLED;
 }
 
@@ -456,6 +455,7 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 	int ret;
 
 	tegra_i2c_flush_fifos(i2c_dev);
+	i2c_writel(i2c_dev, 0xFF, I2C_INT_STATUS);
 
 	if (msg->len == 0)
 		return -EINVAL;
@@ -464,7 +464,7 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 	i2c_dev->msg_buf_remaining = msg->len;
 	i2c_dev->msg_err = I2C_ERR_NONE;
 	i2c_dev->msg_read = (msg->flags & I2C_M_RD);
-	INIT_COMPLETION(i2c_dev->msg_complete);
+	reinit_completion(&i2c_dev->msg_complete);
 
 	packet_header = (0 << PACKET_HEADER0_HEADER_SIZE_SHIFT) |
 			PACKET_HEADER0_PROTOCOL_I2C |
@@ -515,14 +515,6 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_dev *i2c_dev,
 	if (likely(i2c_dev->msg_err == I2C_ERR_NONE))
 		return 0;
 
-	/*
-	 * NACK interrupt is generated before the I2C controller generates the
-	 * STOP condition on the bus. So wait for 2 clock periods before resetting
-	 * the controller so that STOP condition has been delivered properly.
-	 */
-	if (i2c_dev->msg_err == I2C_ERR_NO_ACK)
-		udelay(DIV_ROUND_UP(2 * 1000000, i2c_dev->bus_clk_rate));
-
 	tegra_i2c_init(i2c_dev);
 	if (i2c_dev->msg_err == I2C_ERR_NO_ACK) {
 		if (msg->flags & I2C_M_IGNORE_NAK)
@@ -564,7 +556,7 @@ static const struct i2c_algorithm tegra_i2c_algo = {
 	.functionality	= tegra_i2c_func,
 };
 
-static int __devinit tegra_i2c_probe(struct platform_device *pdev)
+static int tegra_i2c_probe(struct platform_device *pdev)
 {
 	struct tegra_i2c_dev *i2c_dev;
 	struct tegra_i2c_platform_data *pdata = pdev->dev.platform_data;
@@ -572,8 +564,7 @@ static int __devinit tegra_i2c_probe(struct platform_device *pdev)
 	struct resource *iomem;
 	struct clk *clk;
 	struct clk *i2c_clk;
-	const unsigned int *prop;
-	void __iomem *base;
+	void *base;
 	int irq;
 	int ret = 0;
 
@@ -630,22 +621,9 @@ static int __devinit tegra_i2c_probe(struct platform_device *pdev)
 	i2c_dev->irq = irq;
 	i2c_dev->cont_id = pdev->id;
 	i2c_dev->dev = &pdev->dev;
+	i2c_dev->bus_clk_rate = pdata ? pdata->bus_clk_rate : 100000;
 
-	i2c_dev->bus_clk_rate = 100000; /* default clock rate */
-	if (pdata) {
-		i2c_dev->bus_clk_rate = pdata->bus_clk_rate;
-
-	} else if (i2c_dev->dev->of_node) {    /* if there is a device tree node ... */
-		prop = of_get_property(i2c_dev->dev->of_node,
-				"clock-frequency", NULL);
-		if (prop)
-			i2c_dev->bus_clk_rate = be32_to_cpup(prop);
-	}
-
-	if (pdev->dev.of_node)
-		i2c_dev->is_dvc = of_device_is_compatible(pdev->dev.of_node,
-						"nvidia,tegra20-i2c-dvc");
-	else if (pdev->id == 3)
+	if (pdev->id == 3)
 		i2c_dev->is_dvc = 1;
 	init_completion(&i2c_dev->msg_complete);
 
@@ -673,15 +651,12 @@ static int __devinit tegra_i2c_probe(struct platform_device *pdev)
 	i2c_dev->adapter.algo = &tegra_i2c_algo;
 	i2c_dev->adapter.dev.parent = &pdev->dev;
 	i2c_dev->adapter.nr = pdev->id;
-	i2c_dev->adapter.dev.of_node = pdev->dev.of_node;
 
 	ret = i2c_add_numbered_adapter(&i2c_dev->adapter);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to add I2C adapter\n");
 		goto err_free_irq;
 	}
-
-	of_i2c_register_devices(&i2c_dev->adapter);
 
 	return 0;
 err_free_irq:
@@ -699,7 +674,7 @@ err_iounmap:
 	return ret;
 }
 
-static int __devexit tegra_i2c_remove(struct platform_device *pdev)
+static int tegra_i2c_remove(struct platform_device *pdev)
 {
 	struct tegra_i2c_dev *i2c_dev = platform_get_drvdata(pdev);
 	i2c_del_adapter(&i2c_dev->adapter);
@@ -751,7 +726,6 @@ static int tegra_i2c_resume(struct platform_device *pdev)
 /* Match table for of_platform binding */
 static const struct of_device_id tegra_i2c_of_match[] __devinitconst = {
 	{ .compatible = "nvidia,tegra20-i2c", },
-	{ .compatible = "nvidia,tegra20-i2c-dvc", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, tegra_i2c_of_match);
@@ -761,7 +735,7 @@ MODULE_DEVICE_TABLE(of, tegra_i2c_of_match);
 
 static struct platform_driver tegra_i2c_driver = {
 	.probe   = tegra_i2c_probe,
-	.remove  = __devexit_p(tegra_i2c_remove),
+	.remove  = tegra_i2c_remove,
 #ifdef CONFIG_PM
 	.suspend = tegra_i2c_suspend,
 	.resume  = tegra_i2c_resume,

@@ -135,6 +135,21 @@ bad:
 	return -EINVAL;
 }
 
+static int skip_name_map(void **p, void *end)
+{
+        int len;
+        ceph_decode_32_safe(p, end, len ,bad);
+        while (len--) {
+                int strlen;
+                *p += sizeof(u32);
+                ceph_decode_32_safe(p, end, strlen, bad);
+                *p += strlen;
+}
+        return 0;
+bad:
+        return -EINVAL;
+}
+
 static struct crush_map *crush_decode(void *pbyval, void *end)
 {
 	struct crush_map *c;
@@ -143,12 +158,18 @@ static struct crush_map *crush_decode(void *pbyval, void *end)
 	void **p = &pbyval;
 	void *start = pbyval;
 	u32 magic;
+	u32 num_name_maps;
 
 	dout("crush_decode %p to %p len %d\n", *p, end, (int)(end - *p));
 
 	c = kzalloc(sizeof(*c), GFP_NOFS);
 	if (c == NULL)
 		return ERR_PTR(-ENOMEM);
+
+        /* set tunables to default values */
+        c->choose_local_tries = 2;
+        c->choose_local_fallback_tries = 5;
+        c->choose_total_tries = 19;
 
 	ceph_decode_need(p, end, 4*sizeof(u32), bad);
 	magic = ceph_decode_32(p);
@@ -160,13 +181,6 @@ static struct crush_map *crush_decode(void *pbyval, void *end)
 	c->max_buckets = ceph_decode_32(p);
 	c->max_rules = ceph_decode_32(p);
 	c->max_devices = ceph_decode_32(p);
-
-	c->device_parents = kcalloc(c->max_devices, sizeof(u32), GFP_NOFS);
-	if (c->device_parents == NULL)
-		goto badmem;
-	c->bucket_parents = kcalloc(c->max_buckets, sizeof(u32), GFP_NOFS);
-	if (c->bucket_parents == NULL)
-		goto badmem;
 
 	c->buckets = kcalloc(c->max_buckets, sizeof(*c->buckets), GFP_NOFS);
 	if (c->buckets == NULL)
@@ -304,7 +318,25 @@ static struct crush_map *crush_decode(void *pbyval, void *end)
 	}
 
 	/* ignore trailing name maps. */
+        for (num_name_maps = 0; num_name_maps < 3; num_name_maps++) {
+                err = skip_name_map(p, end);
+                if (err < 0)
+                        goto done;
+        }
 
+        /* tunables */
+        ceph_decode_need(p, end, 3*sizeof(u32), done);
+        c->choose_local_tries = ceph_decode_32(p);
+        c->choose_local_fallback_tries =  ceph_decode_32(p);
+        c->choose_total_tries = ceph_decode_32(p);
+        dout("crush decode tunable choose_local_tries = %d",
+             c->choose_local_tries);
+        dout("crush decode tunable choose_local_fallback_tries = %d",
+             c->choose_local_fallback_tries);
+        dout("crush decode tunable choose_total_tries = %d",
+             c->choose_total_tries);
+
+done:
 	dout("crush_decode success\n");
 	return c;
 
@@ -613,12 +645,10 @@ struct ceph_osdmap *osdmap_decode(void **p, void *end)
 	ceph_decode_32_safe(p, end, max, bad);
 	while (max--) {
 		ceph_decode_need(p, end, 4 + 1 + sizeof(pi->v), bad);
-		err = -ENOMEM;
 		pi = kzalloc(sizeof(*pi), GFP_NOFS);
 		if (!pi)
 			goto bad;
 		pi->id = ceph_decode_32(p);
-		err = -EINVAL;
 		ev = ceph_decode_8(p); /* encoding version */
 		if (ev > CEPH_PG_POOL_VERSION) {
 			pr_warning("got unknown v %d > %d of ceph_pg_pool\n",
@@ -634,13 +664,8 @@ struct ceph_osdmap *osdmap_decode(void **p, void *end)
 		__insert_pg_pool(&map->pg_pools, pi);
 	}
 
-	if (version >= 5) {
-		err = __decode_pool_names(p, end, map);
-		if (err < 0) {
-			dout("fail to decode pool names");
-			goto bad;
-		}
-	}
+	if (version >= 5 && __decode_pool_names(p, end, map) < 0)
+		goto bad;
 
 	ceph_decode_32_safe(p, end, map->pool_max, bad);
 
@@ -720,7 +745,7 @@ struct ceph_osdmap *osdmap_decode(void **p, void *end)
 	return map;
 
 bad:
-	dout("osdmap_decode fail err %d\n", err);
+	dout("osdmap_decode fail\n");
 	ceph_osdmap_destroy(map);
 	return ERR_PTR(err);
 }
@@ -814,7 +839,6 @@ struct ceph_osdmap *osdmap_apply_incremental(void **p, void *end,
 		if (ev > CEPH_PG_POOL_VERSION) {
 			pr_warning("got unknown v %d > %d of ceph_pg_pool\n",
 				   ev, CEPH_PG_POOL_VERSION);
-			err = -EINVAL;
 			goto bad;
 		}
 		pi = __lookup_pg_pool(&map->pg_pools, pool);
@@ -831,11 +855,8 @@ struct ceph_osdmap *osdmap_apply_incremental(void **p, void *end,
 		if (err < 0)
 			goto bad;
 	}
-	if (version >= 5) {
-		err = __decode_pool_names(p, end, map);
-		if (err < 0)
-			goto bad;
-	}
+	if (version >= 5 && __decode_pool_names(p, end, map) < 0)
+		goto bad;
 
 	/* old_pool */
 	ceph_decode_32_safe(p, end, len, bad);
@@ -911,13 +932,15 @@ struct ceph_osdmap *osdmap_apply_incremental(void **p, void *end,
 			(void) __remove_pg_mapping(&map->pg_temp, pgid);
 
 			/* insert */
-			err = -EINVAL;
-			if (pglen > (UINT_MAX - sizeof(*pg)) / sizeof(u32))
+			if (pglen > (UINT_MAX - sizeof(*pg)) / sizeof(u32)) {
+				err = -EINVAL;
 				goto bad;
-			err = -ENOMEM;
+			}
 			pg = kmalloc(sizeof(*pg) + sizeof(u32)*pglen, GFP_NOFS);
-			if (!pg)
+			if (!pg) {
+				err = -ENOMEM;
 				goto bad;
+			}
 			pg->pgid = pgid;
 			pg->len = pglen;
 			for (j = 0; j < pglen; j++)
@@ -1035,7 +1058,6 @@ int ceph_calc_object_layout(struct ceph_object_layout *ol,
 {
 	unsigned num, num_mask;
 	struct ceph_pg pgid;
-	s32 preferred = (s32)le32_to_cpu(fl->fl_pg_preferred);
 	int poolid = le32_to_cpu(fl->fl_pg_pool);
 	struct ceph_pg_pool_info *pool;
 	unsigned ps;
@@ -1046,23 +1068,13 @@ int ceph_calc_object_layout(struct ceph_object_layout *ol,
 	if (!pool)
 		return -EIO;
 	ps = ceph_str_hash(pool->v.object_hash, oid, strlen(oid));
-	if (preferred >= 0) {
-		ps += preferred;
-		num = le32_to_cpu(pool->v.lpg_num);
-		num_mask = pool->lpg_num_mask;
-	} else {
-		num = le32_to_cpu(pool->v.pg_num);
-		num_mask = pool->pg_num_mask;
-	}
+	num = le32_to_cpu(pool->v.pg_num);
+	num_mask = pool->pg_num_mask;
 
 	pgid.ps = cpu_to_le16(ps);
-	pgid.preferred = cpu_to_le16(preferred);
+	pgid.preferred = cpu_to_le16(-1);
 	pgid.pool = fl->fl_pg_pool;
-	if (preferred >= 0)
-		dout("calc_object_layout '%s' pgid %d.%xp%d\n", oid, poolid, ps,
-		     (int)preferred);
-	else
-		dout("calc_object_layout '%s' pgid %d.%x\n", oid, poolid, ps);
+	dout("calc_object_layout '%s' pgid %d.%x\n", oid, poolid, ps);
 
 	ol->ol_pgid = pgid;
 	ol->ol_stripe_unit = fl->fl_object_stripe_unit;
@@ -1080,24 +1092,18 @@ static int *calc_pg_raw(struct ceph_osdmap *osdmap, struct ceph_pg pgid,
 	struct ceph_pg_mapping *pg;
 	struct ceph_pg_pool_info *pool;
 	int ruleno;
-	unsigned poolid, ps, pps, t;
-	int preferred;
+	unsigned poolid, ps, pps, t, r;
 
 	poolid = le32_to_cpu(pgid.pool);
 	ps = le16_to_cpu(pgid.ps);
-	preferred = (s16)le16_to_cpu(pgid.preferred);
 
 	pool = __lookup_pg_pool(&osdmap->pg_pools, poolid);
 	if (!pool)
 		return NULL;
 
 	/* pg_temp? */
-	if (preferred >= 0)
-		t = ceph_stable_mod(ps, le32_to_cpu(pool->v.lpg_num),
-				    pool->lpgp_num_mask);
-	else
-		t = ceph_stable_mod(ps, le32_to_cpu(pool->v.pg_num),
-				    pool->pgp_num_mask);
+	t = ceph_stable_mod(ps, le32_to_cpu(pool->v.pg_num),
+			    pool->pgp_num_mask);
 	pgid.ps = cpu_to_le16(t);
 	pg = __lookup_pg_mapping(&osdmap->pg_temp, pgid);
 	if (pg) {
@@ -1115,23 +1121,20 @@ static int *calc_pg_raw(struct ceph_osdmap *osdmap, struct ceph_pg pgid,
 		return NULL;
 	}
 
-	/* don't forcefeed bad device ids to crush */
-	if (preferred >= osdmap->max_osd ||
-	    preferred >= osdmap->crush->max_devices)
-		preferred = -1;
-
-	if (preferred >= 0)
-		pps = ceph_stable_mod(ps,
-				      le32_to_cpu(pool->v.lpgp_num),
-				      pool->lpgp_num_mask);
-	else
-		pps = ceph_stable_mod(ps,
-				      le32_to_cpu(pool->v.pgp_num),
-				      pool->pgp_num_mask);
+	pps = ceph_stable_mod(ps,
+			      le32_to_cpu(pool->v.pgp_num),
+			      pool->pgp_num_mask);
 	pps += poolid;
-	*num = crush_do_rule(osdmap->crush, ruleno, pps, osds,
-			     min_t(int, pool->v.size, *num),
-			     preferred, osdmap->osd_weight);
+	r = crush_do_rule(osdmap->crush, ruleno, pps, osds,
+			  min_t(int, pool->v.size, *num),
+			  osdmap->osd_weight);
+	if (r < 0) {
+		pr_err("error %d from crush rule: pool %d ruleset %d type %d"
+		       " size %d\n", r, poolid, pool->v.crush_ruleset,
+		       pool->v.type, pool->v.size);
+		return NULL;
+	}
+	*num = r;
 	return osds;
 }
 

@@ -1,7 +1,7 @@
 /*
  * max77686.h - Driver for the Maxim 77686
  *
- *  Copyright (C) 2011 Samsung Electrnoics
+ *  Copyright (C) 2012 Samsung Electrnoics
  *  Chiwoong Byun <woong.byun@samsung.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -29,7 +29,6 @@
 #define __LINUX_MFD_MAX77686_H
 
 #include <linux/regulator/consumer.h>
-#include <linux/rtc.h>
 
 /* MAX77686 regulator IDs */
 enum max77686_regulators {
@@ -68,9 +67,6 @@ enum max77686_regulators {
 	MAX77686_BUCK7,
 	MAX77686_BUCK8,
 	MAX77686_BUCK9,
-	MAX77686_EN32KHZ_AP,
-	MAX77686_EN32KHZ_CP,
-	MAX77686_P32KH,
 
 	MAX77686_REG_MAX,
 };
@@ -78,6 +74,7 @@ enum max77686_regulators {
 struct max77686_regulator_data {
 	int id;
 	struct regulator_init_data *initdata;
+	struct device_node *of_node;
 };
 
 enum max77686_opmode {
@@ -86,51 +83,22 @@ enum max77686_opmode {
 	MAX77686_OPMODE_STANDBY,
 };
 
-enum max77686_ramp_rate {
-	MAX77686_RAMP_RATE_100MV,
-	MAX77686_RAMP_RATE_13MV,
-	MAX77686_RAMP_RATE_27MV,
-	MAX77686_RAMP_RATE_55MV,
-};
-
 struct max77686_opmode_data {
 	int id;
 	int mode;
 };
 
-/**
- * struct max77686_wtsr_smpl - settings for WTSR/SMPL
- * @wtsr_en:		WTSR Function Enable Control
- * @smpl_en:		SMPL Function Enable Control
- * @wtsr_timer_val:	Set the WTSR timer Threshold
- *			0(250ms), 1(500ms), 2(750ms), 3(1000ms)
- * @smpl_timer_val:	Set the SMPL timer Threshold
- *			0(0.5s), 1(1.0s), 2(1.5s), 3(2.0s)
- * @check_jigon:	if this value is true, do not enable SMPL function when
- *			JIGONB is low(JIG cable is attached)
- */
-struct max77686_wtsr_smpl {
-	bool wtsr_en;
-	bool smpl_en;
-	int wtsr_timer_val;
-	int smpl_timer_val;
-	bool check_jigon;
-};
-
 struct max77686_platform_data {
 	/* IRQ */
 	int irq_gpio;
-	int irq_base;
 	int ono;
 	int wakeup;
 
 	/* ---- PMIC ---- */
 	struct max77686_regulator_data *regulators;
 	int num_regulators;
-	int has_full_constraints;
 
 	struct max77686_opmode_data *opmode_data;
-	int ramp_rate;
 
 	/*
 	 * GPIO-DVS feature is not enabled with the current version of
@@ -142,10 +110,6 @@ struct max77686_platform_data {
 	unsigned int buck2_voltage[8]; /* buckx_voltage in uV */
 	unsigned int buck3_voltage[8];
 	unsigned int buck4_voltage[8];
-
-	/* ---- RTC ---- */
-	struct max77686_wtsr_smpl *wtsr_smpl;
-	struct rtc_time *init_time;
 };
 
 #endif /* __LINUX_MFD_MAX77686_H */

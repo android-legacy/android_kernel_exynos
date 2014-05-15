@@ -1,6 +1,13 @@
 #ifndef _DYNAMIC_DEBUG_H
 #define _DYNAMIC_DEBUG_H
 
+/* dynamic_printk_enabled, and dynamic_printk_enabled2 are bitmasks in which
+ * bit n is set to 1 if any modname hashes into the bucket n, 0 otherwise. They
+ * use independent hash functions, to reduce the chance of false positives.
+ */
+extern long long dynamic_debug_enabled;
+extern long long dynamic_debug_enabled2;
+
 /*
  * An instance of this structure is created in a special
  * ELF section at every dynamic debug callsite.  At runtime,
@@ -15,10 +22,10 @@ struct _ddebug {
 	const char *function;
 	const char *filename;
 	const char *format;
-	unsigned int lineno:18;
+	unsigned int lineno:24;
 	/*
- 	 * The flags field controls the behaviour at the callsite.
- 	 * The bits here are changed dynamically when the user
+	 * The flags field controls the behaviour at the callsite.
+	 * The bits here are changed dynamically when the user
 	 * writes commands to <debugfs>/dynamic_debug/control
 	 */
 #define _DPRINTK_FLAGS_NONE	0
@@ -33,6 +40,7 @@ struct _ddebug {
 #define _DPRINTK_FLAGS_DEFAULT 0
 #endif
 	unsigned int flags:8;
+	char enabled;
 } __attribute__((aligned(8)));
 
 
@@ -41,6 +49,10 @@ int ddebug_add_module(struct _ddebug *tab, unsigned int n,
 
 #if defined(CONFIG_DYNAMIC_DEBUG)
 extern int ddebug_remove_module(const char *mod_name);
+
+extern int ddebug_dyndbg_module_param_cb(char *param, char *val,
+					const char *modname);
+
 extern __printf(2, 3)
 int __dynamic_pr_debug(struct _ddebug *descriptor, const char *fmt, ...);
 
@@ -66,20 +78,21 @@ int __dynamic_netdev_dbg(struct _ddebug *descriptor,
 		.format = (fmt),				\
 		.lineno = __LINE__,				\
 		.flags =  _DPRINTK_FLAGS_DEFAULT,		\
+		.enabled = false,				\
 	}
 
 #define dynamic_pr_debug(fmt, ...)				\
 do {								\
 	DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt);		\
-	if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT))	\
+	if (unlikely(descriptor.enabled))			\
 		__dynamic_pr_debug(&descriptor, pr_fmt(fmt),	\
 				   ##__VA_ARGS__);		\
 } while (0)
 
 #define dynamic_dev_dbg(dev, fmt, ...)				\
 do {								\
-	DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt);		\
-	if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT))	\
+	DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt);	\
+	if (unlikely(descriptor.enabled))			\
 		__dynamic_dev_dbg(&descriptor, dev, fmt,	\
 				  ##__VA_ARGS__);		\
 } while (0)
@@ -87,16 +100,42 @@ do {								\
 #define dynamic_netdev_dbg(dev, fmt, ...)			\
 do {								\
 	DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt);		\
-	if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT))	\
+	if (unlikely(descriptor.enabled))			\
 		__dynamic_netdev_dbg(&descriptor, dev, fmt,	\
 				     ##__VA_ARGS__);		\
 } while (0)
 
+#define dynamic_hex_dump(prefix_str, prefix_type, rowsize,	\
+			 groupsize, buf, len, ascii)		\
+do {								\
+	DEFINE_DYNAMIC_DEBUG_METADATA(descriptor,		\
+		__builtin_constant_p(prefix_str) ? prefix_str : "hexdump");\
+	if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT))	\
+		print_hex_dump(KERN_DEBUG, prefix_str,		\
+			       prefix_type, rowsize, groupsize,	\
+			       buf, len, ascii);		\
+} while (0)
+
 #else
+
+#include <linux/string.h>
+#include <linux/errno.h>
 
 static inline int ddebug_remove_module(const char *mod)
 {
 	return 0;
+}
+
+static inline int ddebug_dyndbg_module_param_cb(char *param, char *val,
+						const char *modname)
+{
+	if (strstr(param, "dyndbg")) {
+		/* avoid pr_warn(), which wants pr_fmt() fully defined */
+		printk(KERN_WARNING "dyndbg param is supported only in "
+			"CONFIG_DYNAMIC_DEBUG builds\n");
+		return 0; /* allow and ignore */
+	}
+	return -EINVAL;
 }
 
 #define dynamic_pr_debug(fmt, ...)					\

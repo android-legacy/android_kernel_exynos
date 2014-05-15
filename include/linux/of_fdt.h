@@ -90,6 +90,9 @@ extern void *of_get_flat_dt_prop(unsigned long node, const char *name,
 extern int of_flat_dt_is_compatible(unsigned long node, const char *name);
 extern int of_flat_dt_match(unsigned long node, const char *const *matches);
 extern unsigned long of_get_flat_dt_root(void);
+extern int of_scan_flat_dt_by_path(const char *path,
+	int (*it)(unsigned long node, const char *name, int depth, void *data),
+	void *data);
 
 extern int early_init_dt_scan_chosen(unsigned long node, const char *uname,
 				     int depth, void *data);
@@ -106,8 +109,7 @@ extern u64 dt_mem_next_cell(int s, __be32 **cellp);
  * physical addresses.
  */
 #ifdef CONFIG_BLK_DEV_INITRD
-extern void early_init_dt_setup_initrd_arch(unsigned long start,
-					    unsigned long end);
+extern void early_init_dt_setup_initrd_arch(u64 start, u64 end);
 #endif
 
 /* Early flat tree scan hooks */
@@ -117,6 +119,7 @@ extern int early_init_dt_scan_root(unsigned long node, const char *uname,
 /* Other Prototypes */
 extern void unflatten_device_tree(void);
 extern void early_init_devtree(void *);
+extern void early_get_first_memblock_info(void *, phys_addr_t *);
 #else /* CONFIG_OF_FLATTREE */
 static inline void unflatten_device_tree(void) {}
 #endif /* CONFIG_OF_FLATTREE */

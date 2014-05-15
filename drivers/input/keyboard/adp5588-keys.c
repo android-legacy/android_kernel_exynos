@@ -9,6 +9,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -77,8 +78,18 @@ static int adp5588_gpio_get_value(struct gpio_chip *chip, unsigned off)
 	struct adp5588_kpad *kpad = container_of(chip, struct adp5588_kpad, gc);
 	unsigned int bank = ADP5588_BANK(kpad->gpiomap[off]);
 	unsigned int bit = ADP5588_BIT(kpad->gpiomap[off]);
+	int val;
 
-	return !!(adp5588_read(kpad->client, GPIO_DAT_STAT1 + bank) & bit);
+	mutex_lock(&kpad->gpio_lock);
+
+	if (kpad->dir[bank] & bit)
+		val = kpad->dat_out[bank];
+	else
+		val = adp5588_read(kpad->client, GPIO_DAT_STAT1 + bank);
+
+	mutex_unlock(&kpad->gpio_lock);
+
+	return !!(val & bit);
 }
 
 static void adp5588_gpio_set_value(struct gpio_chip *chip,
@@ -550,7 +561,7 @@ static int __devinit adp5588_probe(struct i2c_client *client,
 	}
 
 	error = request_irq(client->irq, adp5588_irq,
-			    IRQF_TRIGGER_FALLING,
+			    IRQF_TRIGGER_FALLING | IRQF_DISABLED,
 			    client->dev.driver->name, kpad);
 	if (error) {
 		dev_err(&client->dev, "irq %d busy?\n", client->irq);
@@ -653,7 +664,17 @@ static struct i2c_driver adp5588_driver = {
 	.id_table = adp5588_id,
 };
 
-module_i2c_driver(adp5588_driver);
+static int __init adp5588_init(void)
+{
+	return i2c_add_driver(&adp5588_driver);
+}
+module_init(adp5588_init);
+
+static void __exit adp5588_exit(void)
+{
+	i2c_del_driver(&adp5588_driver);
+}
+module_exit(adp5588_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");

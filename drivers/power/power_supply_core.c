@@ -61,7 +61,7 @@ static void power_supply_changed_work(struct work_struct *work)
 		spin_lock_irqsave(&psy->changed_lock, flags);
 	}
 	if (!psy->changed)
-		pm_relax(psy->dev);
+		wake_unlock(&psy->work_wake_lock);
 	spin_unlock_irqrestore(&psy->changed_lock, flags);
 }
 
@@ -73,7 +73,7 @@ void power_supply_changed(struct power_supply *psy)
 
 	spin_lock_irqsave(&psy->changed_lock, flags);
 	psy->changed = true;
-	pm_stay_awake(psy->dev);
+	wake_lock(&psy->work_wake_lock);
 	spin_unlock_irqrestore(&psy->changed_lock, flags);
 	schedule_work(&psy->changed_work);
 }
@@ -115,9 +115,7 @@ static int __power_supply_is_system_supplied(struct device *dev, void *data)
 {
 	union power_supply_propval ret = {0,};
 	struct power_supply *psy = dev_get_drvdata(dev);
-	unsigned int *count = data;
 
-	(*count)++;
 	if (psy->type != POWER_SUPPLY_TYPE_BATTERY) {
 		if (psy->get_property(psy, POWER_SUPPLY_PROP_ONLINE, &ret))
 			return 0;
@@ -130,17 +128,9 @@ static int __power_supply_is_system_supplied(struct device *dev, void *data)
 int power_supply_is_system_supplied(void)
 {
 	int error;
-	unsigned int count = 0;
 
-	error = class_for_each_device(power_supply_class, NULL, &count,
+	error = class_for_each_device(power_supply_class, NULL, NULL,
 				      __power_supply_is_system_supplied);
-
-	/*
-	 * If no power class device was found at all, most probably we are
-	 * running on a desktop system, so assume we are on mains power.
-	 */
-	if (count == 0)
-		return 1;
 
 	return error;
 }
@@ -157,7 +147,7 @@ int power_supply_set_battery_charged(struct power_supply *psy)
 }
 EXPORT_SYMBOL_GPL(power_supply_set_battery_charged);
 
-static int power_supply_match_device_by_name(struct device *dev, void *data)
+static int power_supply_match_device_by_name(struct device *dev, const void *data)
 {
 	const char *name = data;
 	struct power_supply *psy = dev_get_drvdata(dev);
@@ -165,7 +155,7 @@ static int power_supply_match_device_by_name(struct device *dev, void *data)
 	return strcmp(psy->name, name) == 0;
 }
 
-struct power_supply *power_supply_get_by_name(char *name)
+struct power_supply *power_supply_get_by_name(const char *name)
 {
 	struct device *dev = class_find_device(power_supply_class, NULL, name,
 					power_supply_match_device_by_name);
@@ -215,9 +205,7 @@ int power_supply_register(struct device *parent, struct power_supply *psy)
 		goto device_add_failed;
 
 	spin_lock_init(&psy->changed_lock);
-	rc = device_init_wakeup(dev, true);
-	if (rc)
-		goto wakeup_init_failed;
+	wake_lock_init(&psy->work_wake_lock, WAKE_LOCK_SUSPEND, "power-supply");
 
 	rc = power_supply_create_triggers(psy);
 	if (rc)
@@ -228,7 +216,7 @@ int power_supply_register(struct device *parent, struct power_supply *psy)
 	goto success;
 
 create_triggers_failed:
-wakeup_init_failed:
+	wake_lock_destroy(&psy->work_wake_lock);
 	device_del(dev);
 kobject_set_name_failed:
 device_add_failed:
@@ -243,6 +231,7 @@ void power_supply_unregister(struct power_supply *psy)
 	cancel_work_sync(&psy->changed_work);
 	sysfs_remove_link(&psy->dev->kobj, "powers");
 	power_supply_remove_triggers(psy);
+	wake_lock_destroy(&psy->work_wake_lock);
 	device_unregister(psy->dev);
 }
 EXPORT_SYMBOL_GPL(power_supply_unregister);

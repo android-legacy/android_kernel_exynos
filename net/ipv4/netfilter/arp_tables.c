@@ -221,9 +221,8 @@ static inline int arp_checkentry(const struct arpt_arp *arp)
 static unsigned int
 arpt_error(struct sk_buff *skb, const struct xt_action_param *par)
 {
-	if (net_ratelimit())
-		pr_err("arp_tables: error: '%s'\n",
-		       (const char *)par->targinfo);
+	net_err_ratelimited("arp_tables: error: '%s'\n",
+			    (const char *)par->targinfo);
 
 	return NF_DROP;
 }
@@ -271,6 +270,11 @@ unsigned int arpt_do_table(struct sk_buff *skb,
 	local_bh_disable();
 	addend = xt_write_recseq_begin();
 	private = table->private;
+	/*
+	 * Ensure we load private-> members after we've fetched the base
+	 * pointer.
+	 */
+	smp_read_barrier_depends();
 	table_base = private->entries[smp_processor_id()];
 
 	e = get_entry(table_base, private->hook_entry[hook]);
@@ -303,7 +307,7 @@ unsigned int arpt_do_table(struct sk_buff *skb,
 			if (v < 0) {
 				/* Pop from stack? */
 				if (v != XT_RETURN) {
-					verdict = (unsigned)(-v) - 1;
+					verdict = (unsigned int)(-v) - 1;
 					break;
 				}
 				e = back;
@@ -1534,7 +1538,7 @@ static int compat_do_arpt_set_ctl(struct sock *sk, int cmd, void __user *user,
 {
 	int ret;
 
-	if (!capable(CAP_NET_ADMIN))
+	if (!ns_capable(sock_net(sk)->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 
 	switch (cmd) {
@@ -1678,7 +1682,7 @@ static int compat_do_arpt_get_ctl(struct sock *sk, int cmd, void __user *user,
 {
 	int ret;
 
-	if (!capable(CAP_NET_ADMIN))
+	if (!ns_capable(sock_net(sk)->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 
 	switch (cmd) {
@@ -1699,7 +1703,7 @@ static int do_arpt_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned
 {
 	int ret;
 
-	if (!capable(CAP_NET_ADMIN))
+	if (!ns_capable(sock_net(sk)->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 
 	switch (cmd) {
@@ -1723,7 +1727,7 @@ static int do_arpt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len
 {
 	int ret;
 
-	if (!capable(CAP_NET_ADMIN))
+	if (!ns_capable(sock_net(sk)->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 
 	switch (cmd) {

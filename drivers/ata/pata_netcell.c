@@ -7,7 +7,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -99,22 +98,10 @@ static struct pci_driver netcell_pci_driver = {
 #endif
 };
 
-static int __init netcell_init(void)
-{
-	return pci_register_driver(&netcell_pci_driver);
-}
-
-static void __exit netcell_exit(void)
-{
-	pci_unregister_driver(&netcell_pci_driver);
-}
-
-module_init(netcell_init);
-module_exit(netcell_exit);
+module_pci_driver(netcell_pci_driver);
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("SCSI low-level driver for Netcell PATA RAID");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, netcell_pci_tbl);
 MODULE_VERSION(DRV_VERSION);
-

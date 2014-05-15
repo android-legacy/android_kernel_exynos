@@ -29,7 +29,7 @@ struct wm8994_ldo_pdata {
 #define WM8994_CONFIGURE_GPIO 0x10000
 
 #define WM8994_DRC_REGS 5
-#define WM8994_EQ_REGS  21
+#define WM8994_EQ_REGS  20
 #define WM8958_MBC_CUTOFF_REGS 20
 #define WM8958_MBC_COEFF_REGS  48
 #define WM8958_MBC_COMBINED_REGS 56
@@ -165,6 +165,10 @@ struct wm8994_pdata {
 	int num_micd_rates;
 	struct wm8958_micd_rate *micd_rates;
 
+	/* Power up delays to add after microphone bias power up (ms) */
+	int micb1_delay;
+	int micb2_delay;
+
         /* LINEOUT can be differential or single ended */
         unsigned int lineout1_diff:1;
         unsigned int lineout2_diff:1;
@@ -177,6 +181,11 @@ struct wm8994_pdata {
 	 * detect (specified in ms)
 	 */
 	int micdet_delay;
+
+	/* Delay between microphone detect completing and reporting on
+	 * insert (specified in ms)
+	 */
+	int mic_id_delay;
 
 	/* IRQ for microphone detection if brought out directly as a
 	 * signal.
@@ -219,6 +228,11 @@ struct wm8994_pdata {
 	 * lines is mastered.
 	 */
 	int max_channels_clocked[WM8994_NUM_AIF];
+
+	/**
+	 * GPIO for the IRQ pin if host only supports edge triggering
+	 */
+	int irq_gpio;
 };
 
 #endif

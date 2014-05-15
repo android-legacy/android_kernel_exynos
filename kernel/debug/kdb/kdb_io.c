@@ -216,7 +216,7 @@ static char *kdb_read(char *buffer, size_t bufsize)
 	int i;
 	int diag, dtab_count;
 	int key;
-	static int last_crlf;
+
 
 	diag = kdbgetintenv("DTABCOUNT", &dtab_count);
 	if (diag)
@@ -237,9 +237,6 @@ poll_again:
 		return buffer;
 	if (key != 9)
 		tab = 0;
-	if (key != 10 && key != 13)
-		last_crlf = 0;
-
 	switch (key) {
 	case 8: /* backspace */
 		if (cp > buffer) {
@@ -257,12 +254,7 @@ poll_again:
 			*cp = tmp;
 		}
 		break;
-	case 10: /* new line */
-	case 13: /* carriage return */
-		/* handle \n after \r */
-		if (last_crlf && last_crlf != key)
-			break;
-		last_crlf = key;
+	case 13: /* enter */
 		*lastchar++ = '\n';
 		*lastchar++ = '\0';
 		if (!KDB_STATE(KGDB_TRANS)) {
@@ -746,9 +738,6 @@ kdb_printit:
 	/* check for having reached the LINES number of printed lines */
 	if (kdb_nextline >= linecount) {
 		char buf1[16] = "";
-#if defined(CONFIG_SMP)
-		char buf2[32];
-#endif
 
 		/* Watch out for recursion here.  Any routine that calls
 		 * kdb_printf will come back through here.  And kdb_read
@@ -762,14 +751,6 @@ kdb_printit:
 		moreprompt = kdbgetenv("MOREPROMPT");
 		if (moreprompt == NULL)
 			moreprompt = "more> ";
-
-#if defined(CONFIG_SMP)
-		if (strchr(moreprompt, '%')) {
-			sprintf(buf2, moreprompt, get_cpu());
-			put_cpu();
-			moreprompt = buf2;
-		}
-#endif
 
 		kdb_input_flush();
 		c = console_drivers;

@@ -643,7 +643,7 @@ static int mxser_change_speed(struct tty_struct *tty,
 	int ret = 0;
 	unsigned char status;
 
-	cflag = tty->termios->c_cflag;
+	cflag = tty->termios.c_cflag;
 	if (!info->ioaddr)
 		return ret;
 
@@ -1009,6 +1009,8 @@ static int mxser_open(struct tty_struct *tty, struct file *filp)
 	line = tty->index;
 	if (line == MXSER_PORTS)
 		return 0;
+	if (line < 0 || line > MXSER_PORTS)
+		return -ENODEV;
 	info = &mxser_boards[line / MXSER_PORTS_PER_BOARD].ports[line % MXSER_PORTS_PER_BOARD];
 	if (!info->ioaddr)
 		return -ENODEV;
@@ -1520,10 +1522,10 @@ static int mxser_ioctl_special(unsigned int cmd, void __user *argp)
 				
 				tty = tty_port_tty_get(port);
 
-				if (!tty || !tty->termios)
+				if (!tty)
 					ms.cflag = ip->normal_termios.c_cflag;
 				else
-					ms.cflag = tty->termios->c_cflag;
+					ms.cflag = tty->termios.c_cflag;
 				tty_kref_put(tty);
 				spin_lock_irq(&ip->slock);
 				status = inb(ip->ioaddr + UART_MSR);
@@ -1589,13 +1591,13 @@ static int mxser_ioctl_special(unsigned int cmd, void __user *argp)
 
 				tty = tty_port_tty_get(&ip->port);
 
-				if (!tty || !tty->termios) {
+				if (!tty) {
 					cflag = ip->normal_termios.c_cflag;
 					iflag = ip->normal_termios.c_iflag;
 					me->baudrate[p] = tty_termios_baud_rate(&ip->normal_termios);
 				} else {
-					cflag = tty->termios->c_cflag;
-					iflag = tty->termios->c_iflag;
+					cflag = tty->termios.c_cflag;
+					iflag = tty->termios.c_iflag;
 					me->baudrate[p] = tty_get_baud_rate(tty);
 				}
 				tty_kref_put(tty);
@@ -1853,7 +1855,7 @@ static void mxser_stoprx(struct tty_struct *tty)
 		}
 	}
 
-	if (tty->termios->c_cflag & CRTSCTS) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		info->MCR &= ~UART_MCR_RTS;
 		outb(info->MCR, info->ioaddr + UART_MCR);
 	}
@@ -1890,7 +1892,7 @@ static void mxser_unthrottle(struct tty_struct *tty)
 		}
 	}
 
-	if (tty->termios->c_cflag & CRTSCTS) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		info->MCR |= UART_MCR_RTS;
 		outb(info->MCR, info->ioaddr + UART_MCR);
 	}
@@ -1939,14 +1941,14 @@ static void mxser_set_termios(struct tty_struct *tty, struct ktermios *old_termi
 	spin_unlock_irqrestore(&info->slock, flags);
 
 	if ((old_termios->c_cflag & CRTSCTS) &&
-			!(tty->termios->c_cflag & CRTSCTS)) {
+			!(tty->termios.c_cflag & CRTSCTS)) {
 		tty->hw_stopped = 0;
 		mxser_start(tty);
 	}
 
 	/* Handle sw stopped */
 	if ((old_termios->c_iflag & IXON) &&
-			!(tty->termios->c_iflag & IXON)) {
+			!(tty->termios.c_iflag & IXON)) {
 		tty->stopped = 0;
 
 		if (info->board->chip_flag) {
@@ -2002,9 +2004,16 @@ static void mxser_wait_until_sent(struct tty_struct *tty, int timeout)
 	 */
 	if (!timeout || timeout > 2 * info->timeout)
 		timeout = 2 * info->timeout;
-
+#ifdef SERIAL_DEBUG_RS_WAIT_UNTIL_SENT
+	printk(KERN_DEBUG "In rs_wait_until_sent(%d) check=%lu...",
+		timeout, char_time);
+	printk("jiff=%lu...", jiffies);
+#endif
 	spin_lock_irqsave(&info->slock, flags);
 	while (!((lsr = inb(info->ioaddr + UART_LSR)) & UART_LSR_TEMT)) {
+#ifdef SERIAL_DEBUG_RS_WAIT_UNTIL_SENT
+		printk("lsr = %d (jiff=%lu)...", lsr, jiffies);
+#endif
 		spin_unlock_irqrestore(&info->slock, flags);
 		schedule_timeout_interruptible(char_time);
 		spin_lock_irqsave(&info->slock, flags);
@@ -2015,6 +2024,10 @@ static void mxser_wait_until_sent(struct tty_struct *tty, int timeout)
 	}
 	spin_unlock_irqrestore(&info->slock, flags);
 	set_current_state(TASK_RUNNING);
+
+#ifdef SERIAL_DEBUG_RS_WAIT_UNTIL_SENT
+	printk("lsr = %d (jiff=%lu)...done\n", lsr, jiffies);
+#endif
 }
 
 /*

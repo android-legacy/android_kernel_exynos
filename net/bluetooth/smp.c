@@ -20,14 +20,18 @@
    SOFTWARE IS DISCLAIMED.
 */
 
+#include <linux/crypto.h>
+#include <linux/scatterlist.h>
+#include <crypto/b128ops.h>
+
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 #include <net/bluetooth/l2cap.h>
 #include <net/bluetooth/mgmt.h>
 #include <net/bluetooth/smp.h>
-#include <linux/crypto.h>
-#include <linux/scatterlist.h>
-#include <crypto/b128ops.h>
+
+/* SSBT :: KJH + */
+#include <asm/unaligned.h>
 
 #define SMP_TIMEOUT	msecs_to_jiffies(30000)
 
@@ -166,7 +170,7 @@ static struct sk_buff *smp_build_cmd(struct l2cap_conn *conn, u8 code,
 
 	lh = (struct l2cap_hdr *) skb_put(skb, L2CAP_HDR_SIZE);
 	lh->len = cpu_to_le16(sizeof(code) + dlen);
-	lh->cid = cpu_to_le16(L2CAP_CID_SMP);
+	lh->cid = __constant_cpu_to_le16(L2CAP_CID_SMP);
 
 	memcpy(skb_put(skb, sizeof(code)), &code, sizeof(code));
 
@@ -229,7 +233,8 @@ static void build_pairing_cmd(struct l2cap_conn *conn,
 		req->io_capability = conn->hcon->io_capability;
 		req->oob_flag = SMP_OOB_NOT_PRESENT;
 		req->max_key_size = SMP_MAX_ENC_KEY_SIZE;
-		req->init_key_dist = 0;
+		/* SSBT :: KJH * */
+		req->init_key_dist = dist_keys;
 		req->resp_key_dist = dist_keys;
 		req->auth_req = (authreq & AUTH_REQ_MASK);
 		return;
@@ -238,7 +243,8 @@ static void build_pairing_cmd(struct l2cap_conn *conn,
 	rsp->io_capability = conn->hcon->io_capability;
 	rsp->oob_flag = SMP_OOB_NOT_PRESENT;
 	rsp->max_key_size = SMP_MAX_ENC_KEY_SIZE;
-	rsp->init_key_dist = 0;
+	/* SSBT :: KJH * */
+	rsp->init_key_dist = req->init_key_dist & dist_keys;
 	rsp->resp_key_dist = req->resp_key_dist & dist_keys;
 	rsp->auth_req = (authreq & AUTH_REQ_MASK);
 }
@@ -281,11 +287,23 @@ static void smp_failure(struct l2cap_conn *conn, u8 reason, u8 send)
 #define REQ_OOB		0x04
 #define OVERLAP		0xFF
 
+/* SSBT :: KJH + for table info.
+* 0 - DisplayOnly
+* 1 - DisplayYesNo
+* 2 - KeyboardOnly
+* 3 - NoInputNoOutput
+* 4 - KeyboardDisplay
+*/
+
+/* gen_method[3][4] is changed to JUST_WORKS.
+  *Although JUST_CFM works with pin 0000, when interacting with NoInputNoOutput,
+  * such a gesture might be confusing to user. Hence its changed to JUST_WORKS
+  */
 static const u8 gen_method[5][5] = {
 	{ JUST_WORKS,  JUST_CFM,    REQ_PASSKEY, JUST_WORKS, REQ_PASSKEY },
 	{ JUST_WORKS,  JUST_CFM,    REQ_PASSKEY, JUST_WORKS, REQ_PASSKEY },
 	{ CFM_PASSKEY, CFM_PASSKEY, REQ_PASSKEY, JUST_WORKS, CFM_PASSKEY },
-	{ JUST_WORKS,  JUST_CFM,    JUST_WORKS,  JUST_WORKS, JUST_CFM    },
+	{ JUST_WORKS,  JUST_CFM,    JUST_WORKS,  JUST_WORKS, JUST_WORKS  },
 	{ CFM_PASSKEY, CFM_PASSKEY, REQ_PASSKEY, JUST_WORKS, OVERLAP     },
 };
 
@@ -580,8 +598,11 @@ static u8 smp_cmd_pairing_req(struct l2cap_conn *conn, struct sk_buff *skb)
 
 	if (!test_and_set_bit(HCI_CONN_LE_SMP_PEND, &conn->hcon->flags))
 		smp = smp_chan_create(conn);
+	else
+		smp = conn->smp_chan;
 
-	smp = conn->smp_chan;
+	if (!smp)
+		return SMP_UNSPECIFIED;
 
 	smp->preq[0] = SMP_CMD_PAIRING_REQ;
 	memcpy(&smp->preq[1], req, sizeof(*req));
@@ -650,7 +671,7 @@ static u8 smp_cmd_pairing_rsp(struct l2cap_conn *conn, struct sk_buff *skb)
 
 	auth |= (req->auth_req | rsp->auth_req) & SMP_AUTH_MITM;
 
-	ret = tk_request(conn, 0, auth, rsp->io_capability, req->io_capability);
+	ret = tk_request(conn, 0, auth, req->io_capability, rsp->io_capability);
 	if (ret)
 		return SMP_UNSPECIFIED;
 
@@ -705,13 +726,16 @@ static u8 smp_cmd_pairing_random(struct l2cap_conn *conn, struct sk_buff *skb)
 	return 0;
 }
 
-static u8 smp_ltk_encrypt(struct l2cap_conn *conn)
+static u8 smp_ltk_encrypt(struct l2cap_conn *conn, u8 sec_level)
 {
 	struct smp_ltk *key;
 	struct hci_conn *hcon = conn->hcon;
 
 	key = hci_find_ltk_by_addr(hcon->hdev, conn->dst, hcon->dst_type);
 	if (!key)
+		return 0;
+
+	if (sec_level > BT_SECURITY_MEDIUM && !key->authenticated)
 		return 0;
 
 	if (test_and_set_bit(HCI_CONN_ENCRYPT_PEND, &hcon->flags))
@@ -734,7 +758,7 @@ static u8 smp_cmd_security_req(struct l2cap_conn *conn, struct sk_buff *skb)
 
 	hcon->pending_sec_level = authreq_to_seclevel(rp->auth_req);
 
-	if (smp_ltk_encrypt(conn))
+	if (smp_ltk_encrypt(conn, hcon->pending_sec_level))
 		return 0;
 
 	if (test_and_set_bit(HCI_CONN_LE_SMP_PEND, &hcon->flags))
@@ -766,14 +790,20 @@ int smp_conn_security(struct hci_conn *hcon, __u8 sec_level)
 	if (!lmp_host_le_capable(hcon->hdev))
 		return 1;
 
-	if (sec_level == BT_SECURITY_LOW)
+	/* SSBT :: KJH + (0223), for Pin or Key Missing case */
+	if (sec_level == BT_SECURITY_LOW) {
+		if (hcon->link_mode & HCI_LM_MASTER)
+			if (smp_ltk_encrypt(conn, sec_level))
+				goto done;
+
 		return 1;
+	}
 
 	if (hcon->sec_level >= sec_level)
 		return 1;
 
 	if (hcon->link_mode & HCI_LM_MASTER)
-		if (smp_ltk_encrypt(conn))
+		if (smp_ltk_encrypt(conn, sec_level))
 			goto done;
 
 	if (test_and_set_bit(HCI_CONN_LE_SMP_PEND, &hcon->flags))
@@ -787,6 +817,13 @@ int smp_conn_security(struct hci_conn *hcon, __u8 sec_level)
 
 	if (hcon->link_mode & HCI_LM_MASTER) {
 		struct smp_cmd_pairing cp;
+		struct smp_ltk *key;
+
+		key = hci_find_ltk_by_addr(hcon->hdev, conn->dst, hcon->dst_type);
+		if (key) {
+			hci_le_start_enc(hcon, key->ediv, key->rand, key->val);
+			goto done;
+		}
 
 		build_pairing_cmd(conn, &cp, NULL, authreq);
 		smp->preq[0] = SMP_CMD_PAIRING_REQ;
@@ -851,19 +888,6 @@ int smp_sig_channel(struct l2cap_conn *conn, struct sk_buff *skb)
 	}
 
 	skb_pull(skb, sizeof(code));
-
-	/*
-	 * The SMP context must be initialized for all other PDUs except
-	 * pairing and security requests. If we get any other PDU when
-	 * not initialized simply disconnect (done if this function
-	 * returns an error).
-	 */
-	if (code != SMP_CMD_PAIRING_REQ && code != SMP_CMD_SECURITY_REQ &&
-	    !conn->smp_chan) {
-		BT_ERR("Unexpected SMP command 0x%02x. Disconnecting.", code);
-		kfree_skb(skb);
-		return -ENOTSUPP;
-	}
 
 	switch (code) {
 	case SMP_CMD_PAIRING_REQ:
@@ -971,7 +995,7 @@ int smp_distribute_keys(struct l2cap_conn *conn, __u8 force)
 			    HCI_SMP_LTK_SLAVE, 1, authenticated,
 			    enc.ltk, smp->enc_key_size, ediv, ident.rand);
 
-		ident.ediv = cpu_to_le16(ediv);
+		ident.ediv = ediv;
 
 		smp_send_cmd(conn, SMP_CMD_MASTER_IDENT, sizeof(ident), &ident);
 

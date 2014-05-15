@@ -5,6 +5,24 @@
  * 'tty.h' defines some structures used by tty_io.c and some defines.
  */
 
+#ifdef __KERNEL__
+#include <linux/fs.h>
+#include <linux/major.h>
+#include <linux/termios.h>
+#include <linux/workqueue.h>
+#include <linux/tty_driver.h>
+#include <linux/tty_ldisc.h>
+#include <linux/mutex.h>
+
+
+
+/*
+ * (Note: the *_driver.minor_start values 1, 64, 128, 192 are
+ * hardcoded at present.)
+ */
+#define NR_UNIX98_PTY_DEFAULT	4096      /* Default maximum for Unix98 ptys */
+#define NR_UNIX98_PTY_RESERVE	1024	  /* Default reserve for main devpts */
+#define NR_UNIX98_PTY_MAX	(1 << MINORBITS) /* Absolute limit */
 #define NR_LDISCS		30
 
 /* line disciplines */
@@ -34,25 +52,6 @@
 #define N_TI_WL		22	/* for TI's WL BT, FM, GPS combo chips */
 #define N_TRACESINK	23	/* Trace data routing for MIPI P1149.7 */
 #define N_TRACEROUTER	24	/* Trace data routing for MIPI P1149.7 */
-
-#ifdef __KERNEL__
-#include <linux/fs.h>
-#include <linux/major.h>
-#include <linux/termios.h>
-#include <linux/workqueue.h>
-#include <linux/tty_driver.h>
-#include <linux/tty_ldisc.h>
-#include <linux/mutex.h>
-
-
-
-/*
- * (Note: the *_driver.minor_start values 1, 64, 128, 192 are
- * hardcoded at present.)
- */
-#define NR_UNIX98_PTY_DEFAULT	4096      /* Default maximum for Unix98 ptys */
-#define NR_UNIX98_PTY_RESERVE	1024	  /* Default reserve for main devpts */
-#define NR_UNIX98_PTY_MAX	(1 << MINORBITS) /* Absolute limit */
 
 /*
  * This character is the same as _POSIX_VDISABLE: it cannot be used as
@@ -103,28 +102,28 @@ struct tty_bufhead {
 #define TTY_PARITY	3
 #define TTY_OVERRUN	4
 
-#define INTR_CHAR(tty) ((tty)->termios->c_cc[VINTR])
-#define QUIT_CHAR(tty) ((tty)->termios->c_cc[VQUIT])
-#define ERASE_CHAR(tty) ((tty)->termios->c_cc[VERASE])
-#define KILL_CHAR(tty) ((tty)->termios->c_cc[VKILL])
-#define EOF_CHAR(tty) ((tty)->termios->c_cc[VEOF])
-#define TIME_CHAR(tty) ((tty)->termios->c_cc[VTIME])
-#define MIN_CHAR(tty) ((tty)->termios->c_cc[VMIN])
-#define SWTC_CHAR(tty) ((tty)->termios->c_cc[VSWTC])
-#define START_CHAR(tty) ((tty)->termios->c_cc[VSTART])
-#define STOP_CHAR(tty) ((tty)->termios->c_cc[VSTOP])
-#define SUSP_CHAR(tty) ((tty)->termios->c_cc[VSUSP])
-#define EOL_CHAR(tty) ((tty)->termios->c_cc[VEOL])
-#define REPRINT_CHAR(tty) ((tty)->termios->c_cc[VREPRINT])
-#define DISCARD_CHAR(tty) ((tty)->termios->c_cc[VDISCARD])
-#define WERASE_CHAR(tty) ((tty)->termios->c_cc[VWERASE])
-#define LNEXT_CHAR(tty)	((tty)->termios->c_cc[VLNEXT])
-#define EOL2_CHAR(tty) ((tty)->termios->c_cc[VEOL2])
+#define INTR_CHAR(tty) ((tty)->termios.c_cc[VINTR])
+#define QUIT_CHAR(tty) ((tty)->termios.c_cc[VQUIT])
+#define ERASE_CHAR(tty) ((tty)->termios.c_cc[VERASE])
+#define KILL_CHAR(tty) ((tty)->termios.c_cc[VKILL])
+#define EOF_CHAR(tty) ((tty)->termios.c_cc[VEOF])
+#define TIME_CHAR(tty) ((tty)->termios.c_cc[VTIME])
+#define MIN_CHAR(tty) ((tty)->termios.c_cc[VMIN])
+#define SWTC_CHAR(tty) ((tty)->termios.c_cc[VSWTC])
+#define START_CHAR(tty) ((tty)->termios.c_cc[VSTART])
+#define STOP_CHAR(tty) ((tty)->termios.c_cc[VSTOP])
+#define SUSP_CHAR(tty) ((tty)->termios.c_cc[VSUSP])
+#define EOL_CHAR(tty) ((tty)->termios.c_cc[VEOL])
+#define REPRINT_CHAR(tty) ((tty)->termios.c_cc[VREPRINT])
+#define DISCARD_CHAR(tty) ((tty)->termios.c_cc[VDISCARD])
+#define WERASE_CHAR(tty) ((tty)->termios.c_cc[VWERASE])
+#define LNEXT_CHAR(tty)	((tty)->termios.c_cc[VLNEXT])
+#define EOL2_CHAR(tty) ((tty)->termios.c_cc[VEOL2])
 
-#define _I_FLAG(tty, f)	((tty)->termios->c_iflag & (f))
-#define _O_FLAG(tty, f)	((tty)->termios->c_oflag & (f))
-#define _C_FLAG(tty, f)	((tty)->termios->c_cflag & (f))
-#define _L_FLAG(tty, f)	((tty)->termios->c_lflag & (f))
+#define _I_FLAG(tty, f)	((tty)->termios.c_iflag & (f))
+#define _O_FLAG(tty, f)	((tty)->termios.c_oflag & (f))
+#define _C_FLAG(tty, f)	((tty)->termios.c_cflag & (f))
+#define _L_FLAG(tty, f)	((tty)->termios.c_lflag & (f))
 
 #define I_IGNBRK(tty)	_I_FLAG((tty), IGNBRK)
 #define I_BRKINT(tty)	_I_FLAG((tty), BRKINT)
@@ -219,7 +218,7 @@ struct tty_port_operations {
 	/* Called on the final put of a port */
 	void (*destruct)(struct tty_port *port);
 };
-	
+
 struct tty_port {
 	struct tty_struct	*tty;		/* Back pointer */
 	const struct tty_port_operations *ops;	/* Port operations */
@@ -271,7 +270,7 @@ struct tty_struct {
 	struct mutex termios_mutex;
 	spinlock_t ctrl_lock;
 	/* Termios values are protected by the termios mutex */
-	struct ktermios *termios, *termios_locked;
+	struct ktermios termios, termios_locked;
 	struct termiox *termiox;	/* May be NULL for unsupported */
 	char name[64];
 	struct pid *pgrp;		/* Protected by ctrl lock */
@@ -295,7 +294,11 @@ struct tty_struct {
 	void *driver_data;
 	struct list_head tty_files;
 
+#ifdef CONFIG_MDM_HSIC_PM
+#define N_TTY_BUF_SIZE 16384
+#else
 #define N_TTY_BUF_SIZE 4096
+#endif
 
 	/*
 	 * The following is data for the N_TTY line discipline.  For
@@ -521,6 +524,8 @@ extern int tty_port_close_start(struct tty_port *port,
 extern void tty_port_close_end(struct tty_port *port, struct tty_struct *tty);
 extern void tty_port_close(struct tty_port *port,
 				struct tty_struct *tty, struct file *filp);
+extern int tty_port_install(struct tty_port *port, struct tty_driver *driver,
+				struct tty_struct *tty);
 extern int tty_port_open(struct tty_port *port,
 				struct tty_struct *tty, struct file *filp);
 static inline int tty_port_users(struct tty_port *port)
@@ -553,7 +558,7 @@ extern void tty_audit_fork(struct signal_struct *sig);
 extern void tty_audit_tiocsti(struct tty_struct *tty, char ch);
 extern void tty_audit_push(struct tty_struct *tty);
 extern int tty_audit_push_task(struct task_struct *tsk,
-			       uid_t loginuid, u32 sessionid);
+			       kuid_t loginuid, u32 sessionid);
 #else
 static inline void tty_audit_add_data(struct tty_struct *tty,
 				      unsigned char *data, size_t size)
@@ -572,7 +577,7 @@ static inline void tty_audit_push(struct tty_struct *tty)
 {
 }
 static inline int tty_audit_push_task(struct task_struct *tsk,
-				      uid_t loginuid, u32 sessionid)
+				      kuid_t loginuid, u32 sessionid)
 {
 	return 0;
 }
@@ -583,8 +588,6 @@ extern int __init tty_init(void);
 
 /* tty_ioctl.c */
 extern int n_tty_ioctl_helper(struct tty_struct *tty, struct file *file,
-		       unsigned int cmd, unsigned long arg);
-extern long n_tty_compat_ioctl_helper(struct tty_struct *tty, struct file *file,
 		       unsigned int cmd, unsigned long arg);
 
 /* serial.c */
@@ -667,6 +670,13 @@ do {									\
 	finish_wait(&wq, &__wait);					\
 } while (0)
 
+#ifdef CONFIG_PROC_FS
+extern void proc_tty_register_driver(struct tty_driver *);
+extern void proc_tty_unregister_driver(struct tty_driver *);
+#else
+static inline void proc_tty_register_driver(struct tty_driver *d) {}
+static inline void proc_tty_unregister_driver(struct tty_driver *d) {}
+#endif
 
 #endif /* __KERNEL__ */
 #endif

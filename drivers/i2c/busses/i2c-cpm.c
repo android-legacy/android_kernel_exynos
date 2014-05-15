@@ -40,7 +40,9 @@
 #include <linux/i2c.h>
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
+#include <linux/of_address.h>
 #include <linux/of_device.h>
+#include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/of_i2c.h>
 #include <sysdev/fsl_soc.h>
@@ -724,7 +726,18 @@ static struct platform_driver cpm_i2c_driver = {
 	},
 };
 
-module_platform_driver(cpm_i2c_driver);
+static int __init cpm_i2c_init(void)
+{
+	return platform_driver_register(&cpm_i2c_driver);
+}
+
+static void __exit cpm_i2c_exit(void)
+{
+	platform_driver_unregister(&cpm_i2c_driver);
+}
+
+module_init(cpm_i2c_init);
+module_exit(cpm_i2c_exit);
 
 MODULE_AUTHOR("Jochen Friedrich <jochen@scram.de>");
 MODULE_DESCRIPTION("I2C-Bus adapter routines for CPM boards");

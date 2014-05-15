@@ -144,9 +144,9 @@ struct input_keymap_entry {
 #define EVIOCGSND(len)		_IOC(_IOC_READ, 'E', 0x1a, len)		/* get all sounds status */
 #define EVIOCGSW(len)		_IOC(_IOC_READ, 'E', 0x1b, len)		/* get all switch states */
 
-#define EVIOCGBIT(ev,len)	_IOC(_IOC_READ, 'E', 0x20 + (ev), len)	/* get event bits */
-#define EVIOCGABS(abs)		_IOR('E', 0x40 + (abs), struct input_absinfo)	/* get abs value/limits */
-#define EVIOCSABS(abs)		_IOW('E', 0xc0 + (abs), struct input_absinfo)	/* set abs value/limits */
+#define EVIOCGBIT(ev,len)	_IOC(_IOC_READ, 'E', 0x20 + ev, len)	/* get event bits */
+#define EVIOCGABS(abs)		_IOR('E', 0x40 + abs, struct input_absinfo)	/* get abs value/limits */
+#define EVIOCSABS(abs)		_IOW('E', 0xc0 + abs, struct input_absinfo)	/* set abs value/limits */
 
 #define EVIOCSFF		_IOC(_IOC_WRITE, 'E', 0x80, sizeof(struct ff_effect))	/* send a force effect to a force feedback device */
 #define EVIOCRMFF		_IOW('E', 0x81, int)			/* Erase a force effect */
@@ -198,8 +198,6 @@ struct input_keymap_entry {
 #define SYN_CONFIG		1
 #define SYN_MT_REPORT		2
 #define SYN_DROPPED		3
-#define SYN_TIME_SEC		4
-#define SYN_TIME_NSEC		5
 
 /*
  * Keys and buttons
@@ -470,7 +468,13 @@ struct input_keymap_entry {
 #define KEY_WIMAX		246
 #define KEY_RFKILL		247	/* Key that controls all radios */
 
-#define KEY_MICMUTE		248	/* Mute / unmute the microphone */
+#define KEY_POUND		248
+#define KEY_STAR		249
+#define KEY_NETWORK		250
+
+#define KEY_FOLDER_OPEN		251  /*only use Grande CHN CTC */
+#define KEY_FOLDER_CLOSE	252  /*only use Grande CHN CTC */
+#define KEY_3G	253  /*only use Grande CHN CTC */
 
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
@@ -708,6 +712,14 @@ struct input_keymap_entry {
 #define KEY_CAMERA_LEFT		0x219
 #define KEY_CAMERA_RIGHT	0x21a
 
+#define KEY_DMB_ANT_DET_UP		0x21b
+#define KEY_DMB_ANT_DET_DOWN	0x21c
+
+#define KEY_PEN_PDCT		0x230 /* E-PEN PDCT flag*/
+
+#define KEY_FAKE_PWR		0x240 /* Fake Power off flag*/
+
+
 #define BTN_TRIGGER_HAPPY		0x2c0
 #define BTN_TRIGGER_HAPPY1		0x2c0
 #define BTN_TRIGGER_HAPPY2		0x2c1
@@ -818,11 +830,15 @@ struct input_keymap_entry {
 #define ABS_MT_TRACKING_ID	0x39	/* Unique ID of initiated contact */
 #define ABS_MT_PRESSURE		0x3a	/* Pressure on contact area */
 #define ABS_MT_DISTANCE		0x3b	/* Contact hover distance */
+#define ABS_MT_ANGLE		0x3c	/* touch angle */
+#define ABS_MT_COMPONENT	0x3c	/* touch component */
+#define ABS_MT_PALM		0x3d	/* palm touch */
+#define ABS_MT_SUMSIZE		0x3d	/* touch sumsize */
 
 #ifdef __KERNEL__
 /* Implementation details, userspace should not care about these */
 #define ABS_MT_FIRST		ABS_MT_TOUCH_MAJOR
-#define ABS_MT_LAST		ABS_MT_DISTANCE
+#define ABS_MT_LAST		ABS_MT_PALM
 #endif
 
 #define ABS_MAX			0x3f
@@ -847,7 +863,8 @@ struct input_keymap_entry {
 #define SW_KEYPAD_SLIDE		0x0a  /* set = keypad slide out */
 #define SW_FRONT_PROXIMITY	0x0b  /* set = front proximity sensor active */
 #define SW_ROTATE_LOCK		0x0c  /* set = rotate locked/disabled */
-#define SW_LINEIN_INSERT	0x0d  /* set = inserted */
+#define SW_LINEIN_INSERT	0x0d	/* set = inserted */
+#define SW_PEN_INSERT		0x0e	/* set = pen out */
 #define SW_MAX			0x0f
 #define SW_CNT			(SW_MAX+1)
 
@@ -1171,6 +1188,18 @@ struct ff_effect {
 #include <linux/mod_devicetable.h>
 
 /**
+ * struct input_value - input value representation
+ * @type: type of value (EV_KEY, EV_ABS, etc)
+ * @code: the value code
+ * @value: the value
+ */
+struct input_value {
+	__u16 type;
+	__u16 code;
+	__s32 value;
+};
+
+/**
  * struct input_dev - represents an input device
  * @name: name of the device
  * @phys: physical path to the device in the system hierarchy
@@ -1205,11 +1234,7 @@ struct ff_effect {
  *	software autorepeat
  * @timer: timer for software autorepeat
  * @rep: current values for autorepeat parameters (delay, rate)
- * @mt: pointer to array of struct input_mt_slot holding current values
- *	of tracked contacts
- * @mtsize: number of MT slots the device uses
- * @slot: MT slot currently being transmitted
- * @trkid: stores MT tracking ID for the current contact
+ * @mt: pointer to multitouch state
  * @absinfo: array of &struct input_absinfo elements holding information
  *	about absolute axes (current value, min, max, flat, fuzz,
  *	resolution)
@@ -1246,11 +1271,12 @@ struct ff_effect {
  *	last user closes the device
  * @going_away: marks devices that are in a middle of unregistering and
  *	causes input_open_device*() fail with -ENODEV.
- * @sync: set to %true when there were no new events since last EV_SYN
  * @dev: driver model's view of this device
  * @h_list: list of input handles associated with the device. When
  *	accessing the list dev->mutex must be held
  * @node: used to place the device onto input_dev_list
+ * @devres_managed: indicates that devices is managed with devres framework
+ *	and needs not be explicitly unregistered or freed.
  */
 struct input_dev {
 	const char *name;
@@ -1289,10 +1315,7 @@ struct input_dev {
 
 	int rep[REP_CNT];
 
-	struct input_mt_slot *mt;
-	int mtsize;
-	int slot;
-	int trkid;
+	struct input_mt *mt;
 
 	struct input_absinfo *absinfo;
 
@@ -1312,16 +1335,18 @@ struct input_dev {
 	struct mutex mutex;
 
 	unsigned int users;
-	unsigned int users_private;
 	bool going_away;
-	bool disabled;
-
-	bool sync;
 
 	struct device dev;
 
 	struct list_head	h_list;
 	struct list_head	node;
+
+	unsigned int num_vals;
+	unsigned int max_vals;
+	struct input_value *vals;
+
+	bool devres_managed;
 };
 #define to_input_dev(d) container_of(d, struct input_dev, dev)
 
@@ -1382,6 +1407,9 @@ struct input_handle;
  * @event: event handler. This method is being called by input core with
  *	interrupts disabled and dev->event_lock spinlock held and so
  *	it may not sleep
+ * @events: event sequence handler. This method is being called by
+ *	input core with interrupts disabled and dev->event_lock
+ *	spinlock held and so it may not sleep
  * @filter: similar to @event; separates normal event handlers from
  *	"filters".
  * @match: called after comparing device's id with handler's id_table
@@ -1391,8 +1419,8 @@ struct input_handle;
  * @start: starts handler for given handle. This function is called by
  *	input core right after connect() method and also when a process
  *	that "grabbed" a device releases it
- * @fops: file operations this driver implements
- * @minor: beginning of range of 32 minors for devices this driver
+ * @legacy_minors: set to %true by drivers using legacy minor ranges
+ * @minor: beginning of range of 32 legacy minors for devices this driver
  *	can provide
  * @name: name of the handler, to be shown in /proc/bus/input/handlers
  * @id_table: pointer to a table of input_device_ids this driver can
@@ -1418,13 +1446,15 @@ struct input_handler {
 	void *private;
 
 	void (*event)(struct input_handle *handle, unsigned int type, unsigned int code, int value);
+	void (*events)(struct input_handle *handle,
+		       const struct input_value *vals, unsigned int count);
 	bool (*filter)(struct input_handle *handle, unsigned int type, unsigned int code, int value);
 	bool (*match)(struct input_handler *handler, struct input_dev *dev);
 	int (*connect)(struct input_handler *handler, struct input_dev *dev, const struct input_device_id *id);
 	void (*disconnect)(struct input_handle *handle);
 	void (*start)(struct input_handle *handle);
 
-	const struct file_operations *fops;
+	bool legacy_minors;
 	int minor;
 	const char *name;
 
@@ -1460,7 +1490,8 @@ struct input_handle {
 	struct list_head	h_node;
 };
 
-struct input_dev *input_allocate_device(void);
+struct input_dev __must_check *input_allocate_device(void);
+struct input_dev __must_check *devm_input_allocate_device(struct device *);
 void input_free_device(struct input_dev *dev);
 
 static inline struct input_dev *input_get_device(struct input_dev *dev)
@@ -1491,6 +1522,10 @@ void input_reset_device(struct input_dev *);
 
 int __must_check input_register_handler(struct input_handler *);
 void input_unregister_handler(struct input_handler *);
+
+int __must_check input_get_new_minor(int legacy_base, unsigned int legacy_num,
+				     bool allow_dynamic);
+void input_free_minor(unsigned int minor);
 
 int input_handler_for_each_handle(struct input_handler *, void *data,
 				  int (*fn)(struct input_handle *, void *));

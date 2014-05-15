@@ -5,7 +5,7 @@
 #include <linux/threads.h>
 #include <asm/irq.h>
 
-#define NR_IPI	6
+#define NR_IPI	7
 
 typedef struct {
 	unsigned int __softirq_pending;
@@ -19,11 +19,7 @@ typedef struct {
 #define __inc_irq_stat(cpu, member)	__IRQ_STAT(cpu, member)++
 #define __get_irq_stat(cpu, member)	__IRQ_STAT(cpu, member)
 
-#ifdef CONFIG_SMP
 u64 smp_irq_stat_cpu(unsigned int cpu);
-#else
-#define smp_irq_stat_cpu(cpu)	0
-#endif
 
 #define arch_irq_stat_cpu	smp_irq_stat_cpu
 

@@ -1,14 +1,14 @@
 /*
  * Driver O/S-independent utility routines
  *
- * Copyright (C) 1999-2013, Broadcom Corporation
- * 
+ * Copyright (C) 1999-2012, Broadcom Corporation
+ *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,11 +16,11 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
- * $Id: bcmutils.c 412804 2013-07-16 16:26:39Z $
+ * $Id: bcmutils.c 367039 2012-11-06 11:31:19Z $
  */
 
 #include <bcm_cfg.h>
@@ -1117,7 +1117,7 @@ prpkt(const char *msg, osl_t *osh, void *p0)
 	for (p = p0; p; p = PKTNEXT(osh, p))
 		prhex(NULL, PKTDATA(osh, p), PKTLEN(osh, p));
 }
-#endif	
+#endif
 
 /* Takes an Ethernet frame and sets out-of-bound PKTPRIO.
  * Also updates the inplace vlan tag if requested.
@@ -1176,29 +1176,7 @@ pktsetprio(void *pkt, bool update_vtag)
 	} else if (eh->ether_type == hton16(ETHER_TYPE_IP)) {
 		uint8 *ip_body = pktdata + sizeof(struct ether_header);
 		uint8 tos_tc = IP_TOS46(ip_body);
-		uint8 dscp = tos_tc >> IPV4_TOS_DSCP_SHIFT;
-		switch (dscp) {
-		case DSCP_EF:
-			priority = PRIO_8021D_VO;
-			break;
-		case DSCP_AF31:
-		case DSCP_AF32:
-		case DSCP_AF33:
-			priority = PRIO_8021D_CL;
-			break;
-		case DSCP_AF21:
-		case DSCP_AF22:
-		case DSCP_AF23:
-		case DSCP_AF11:
-		case DSCP_AF12:
-		case DSCP_AF13:
-			priority = PRIO_8021D_EE;
-			break;
-		default:
-			priority = (int)(tos_tc >> IPV4_TOS_PREC_SHIFT);
-			break;
-		}
-
+		priority = (int)(tos_tc >> IPV4_TOS_PREC_SHIFT);
 		rc |= PKTPRIO_DSCP;
 	}
 
@@ -1533,8 +1511,8 @@ hndcrc32(uint8 *pdata, uint nbytes, uint32 crc)
 }
 
 #ifdef notdef
-#define CLEN 	1499 	/*  CRC Length */
-#define CBUFSIZ 	(CLEN+4)
+#define CLEN	1499	/*  CRC Length */
+#define CBUFSIZ		(CLEN+4)
 #define CNBUFS		5 /* # of bufs */
 
 void
@@ -1756,7 +1734,7 @@ bcm_format_hex(char *str, const void *bytes, int len)
 	}
 	return (int)(p - str);
 }
-#endif 
+#endif
 
 /* pretty hex print a contiguous buffer */
 void
@@ -1803,10 +1781,20 @@ static const char *crypto_algo_names[] = {
 	"AES_CCM",
 	"AES_OCB_MSDU",
 	"AES_OCB_MPDU",
+#ifdef BCMCCX
+	"CKIP",
+	"CKIP_MMH",
+	"WEP_MMH",
+	"NALG"
+#else
 	"NALG"
 	"UNDEF",
 	"UNDEF",
 	"UNDEF",
+#endif /* BCMCCX */
+#ifdef BCMWAPI_WPI
+	"WAPI",
+#endif /* BCMWAPI_WPI */
 	"UNDEF"
 };
 
@@ -1934,7 +1922,7 @@ bcm_mkiovar(char *name, char *data, uint datalen, char *buf, uint buflen)
 #define QDBM_TABLE_HIGH_BOUND 64938 /* High bound */
 
 static const uint16 nqdBm_to_mW_map[QDBM_TABLE_LEN] = {
-/* qdBm: 	+0 	+1 	+2 	+3 	+4 	+5 	+6 	+7 */
+/* qdBm:	+0	+1	+2	+3	+4	+5	+6	+7 */
 /* 153: */      6683,	7079,	7499,	7943,	8414,	8913,	9441,	10000,
 /* 161: */      10593,	11220,	11885,	12589,	13335,	14125,	14962,	15849,
 /* 169: */      16788,	17783,	18836,	19953,	21135,	22387,	23714,	25119,
@@ -2109,39 +2097,6 @@ bcm_print_bytes(const char *name, const uchar *data, int len)
 	}
 	printf("\n");
 }
-
-/* Look for vendor-specific IE with specified OUI and optional type */
-bcm_tlv_t *
-find_vendor_ie(void *tlvs, int tlvs_len, const char *voui, uint8 *type, int type_len)
-{
-	bcm_tlv_t *ie;
-	uint8 ie_len;
-
-	ie = (bcm_tlv_t*)tlvs;
-
-	/* make sure we are looking at a valid IE */
-	if (ie == NULL ||
-	    !bcm_valid_tlv(ie, tlvs_len))
-		return NULL;
-
-	/* Walk through the IEs looking for an OUI match */
-	do {
-		ie_len = ie->len;
-		if ((ie->id == DOT11_MNG_PROPR_ID) &&
-		    (ie_len >= (DOT11_OUI_LEN + type_len)) &&
-		    !bcmp(ie->data, voui, DOT11_OUI_LEN))
-		{
-			/* compare optional type */
-			if (type_len == 0 ||
-			    !bcmp(&ie->data[DOT11_OUI_LEN], type, type_len)) {
-				return (ie);		/* a match */
-			}
-		}
-	} while ((ie = bcm_next_tlv(ie, &tlvs_len)) != NULL);
-
-	return NULL;
-}
-
 #if defined(WLTINYDUMP) || defined(WLMSG_INFORM) || defined(WLMSG_ASSOC) || \
 	defined(WLMSG_PRPKT) || defined(WLMSG_WSEC)
 #define SSID_FMT_BUF_LEN	((4 * DOT11_MAX_SSID_LEN) + 1)
@@ -2171,7 +2126,7 @@ bcm_format_ssid(char* buf, const uchar ssid[], uint ssid_len)
 
 	return (int)(p - buf);
 }
-#endif 
+#endif
 
 #endif /* BCMDRIVER */
 
@@ -2229,93 +2184,3 @@ process_nvram_vars(char *varbuf, unsigned int len)
 
 	return buf_len;
 }
-
-/* calculate a * b + c */
-void
-bcm_uint64_multiple_add(uint32* r_high, uint32* r_low, uint32 a, uint32 b, uint32 c)
-{
-#define FORMALIZE(var) {cc += (var & 0x80000000) ? 1 : 0; var &= 0x7fffffff;}
-	uint32 r1, r0;
-	uint32 a1, a0, b1, b0, t, cc = 0;
-
-	a1 = a >> 16;
-	a0 = a & 0xffff;
-	b1 = b >> 16;
-	b0 = b & 0xffff;
-
-	r0 = a0 * b0;
-	FORMALIZE(r0);
-
-	t = (a1 * b0) << 16;
-	FORMALIZE(t);
-
-	r0 += t;
-	FORMALIZE(r0);
-
-	t = (a0 * b1) << 16;
-	FORMALIZE(t);
-
-	r0 += t;
-	FORMALIZE(r0);
-
-	FORMALIZE(c);
-
-	r0 += c;
-	FORMALIZE(r0);
-
-	r0 |= (cc % 2) ? 0x80000000 : 0;
-	r1 = a1 * b1 + ((a1 * b0) >> 16) + ((b1 * a0) >> 16) + (cc / 2);
-
-	*r_high = r1;
-	*r_low = r0;
-}
-
-/* calculate a / b */
-void
-bcm_uint64_divide(uint32* r, uint32 a_high, uint32 a_low, uint32 b)
-{
-	uint32 a1 = a_high, a0 = a_low, r0 = 0;
-
-	if (b < 2)
-		return;
-
-	while (a1 != 0) {
-		r0 += (0xffffffff / b) * a1;
-		bcm_uint64_multiple_add(&a1, &a0, ((0xffffffff % b) + 1) % b, a1, a0);
-	}
-
-	r0 += a0 / b;
-	*r = r0;
-}
-
-#ifndef setbit     /* As in the header file */
-#ifdef BCMUTILS_BIT_MACROS_USE_FUNCS
-/* Set bit in byte array. */
-void
-setbit(void *array, uint bit)
-{
-	((uint8 *)array)[bit / NBBY] |= 1 << (bit % NBBY);
-}
-
-/* Clear bit in byte array. */
-void
-clrbit(void *array, uint bit)
-{
-	((uint8 *)array)[bit / NBBY] &= ~(1 << (bit % NBBY));
-}
-
-/* Test if bit is set in byte array. */
-bool
-isset(const void *array, uint bit)
-{
-	return (((const uint8 *)array)[bit / NBBY] & (1 << (bit % NBBY)));
-}
-
-/* Test if bit is clear in byte array. */
-bool
-isclr(const void *array, uint bit)
-{
-	return ((((const uint8 *)array)[bit / NBBY] & (1 << (bit % NBBY))) == 0);
-}
-#endif /* BCMUTILS_BIT_MACROS_USE_FUNCS */
-#endif /* setbit */

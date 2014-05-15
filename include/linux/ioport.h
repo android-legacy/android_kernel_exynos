@@ -23,6 +23,12 @@ struct resource {
 	struct resource *parent, *sibling, *child;
 };
 
+struct resource_list {
+	struct resource_list *next;
+	struct resource *res;
+	struct pci_dev *dev;
+};
+
 /*
  * IO resources have these defined flags.
  */
@@ -191,6 +197,10 @@ extern struct resource * __request_region(struct resource *,
 extern int __check_region(struct resource *, resource_size_t, resource_size_t);
 extern void __release_region(struct resource *, resource_size_t,
 				resource_size_t);
+#ifdef CONFIG_MEMORY_HOTREMOVE
+extern int release_mem_region_adjustable(struct resource *, resource_size_t,
+				resource_size_t);
+#endif
 
 static inline int __deprecated check_region(resource_size_t s,
 						resource_size_t n)

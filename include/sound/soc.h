@@ -185,20 +185,6 @@
 		 .rreg = xreg_right, .shift = xshift, \
 		 .min = xmin, .max = xmax} }
 
-#define SND_SOC_BYTES(xname, xbase, xregs)		      \
-{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname,   \
-	.info = snd_soc_bytes_info, .get = snd_soc_bytes_get, \
-	.put = snd_soc_bytes_put, .private_value =	      \
-		((unsigned long)&(struct soc_bytes)           \
-		{.base = xbase, .num_regs = xregs }) }
-
-#define SND_SOC_BYTES_MASK(xname, xbase, xregs, xmask)	      \
-{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname,   \
-	.info = snd_soc_bytes_info, .get = snd_soc_bytes_get, \
-	.put = snd_soc_bytes_put, .private_value =	      \
-		((unsigned long)&(struct soc_bytes)           \
-		{.base = xbase, .num_regs = xregs,	      \
-		 .mask = xmask }) }
 
 /*
  * Simplified versions of above macros, declaring a struct and calculating
@@ -286,11 +272,6 @@ enum snd_soc_compress_type {
 enum snd_soc_pcm_subclass {
 	SND_SOC_PCM_CLASS_PCM	= 0,
 	SND_SOC_PCM_CLASS_BE	= 1,
-};
-
-enum snd_soc_card_subclass {
-	SND_SOC_CARD_CLASS_INIT	= 0,
-	SND_SOC_CARD_CLASS_PCM	= 1,
 };
 
 int snd_soc_codec_set_sysclk(struct snd_soc_codec *codec, int clk_id,
@@ -385,7 +366,7 @@ void snd_soc_free_ac97_codec(struct snd_soc_codec *codec);
  *Controls
  */
 struct snd_kcontrol *snd_soc_cnew(const struct snd_kcontrol_new *_template,
-				  void *data, const char *long_name,
+				  void *data, char *long_name,
 				  const char *prefix);
 int snd_soc_add_codec_controls(struct snd_soc_codec *codec,
 	const struct snd_kcontrol_new *controls, int num_controls);
@@ -432,13 +413,6 @@ int snd_soc_get_volsw_2r_sx(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol);
 int snd_soc_put_volsw_2r_sx(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol);
-int snd_soc_bytes_info(struct snd_kcontrol *kcontrol,
-		       struct snd_ctl_elem_info *uinfo);
-int snd_soc_bytes_get(struct snd_kcontrol *kcontrol,
-		      struct snd_ctl_elem_value *ucontrol);
-int snd_soc_bytes_put(struct snd_kcontrol *kcontrol,
-		      struct snd_ctl_elem_value *ucontrol);
-
 
 /**
  * struct snd_soc_reg_access - Describes whether a given register is
@@ -650,6 +624,7 @@ struct snd_soc_codec_driver {
 	int (*volatile_register)(struct snd_soc_codec *, unsigned int);
 	int (*readable_register)(struct snd_soc_codec *, unsigned int);
 	int (*writable_register)(struct snd_soc_codec *, unsigned int);
+	short max_register;
 	unsigned int reg_cache_size;
 	short reg_cache_step;
 	short reg_word_size;
@@ -668,8 +643,6 @@ struct snd_soc_codec_driver {
 
 	/* codec stream completion event */
 	int (*stream_event)(struct snd_soc_dapm_context *dapm, int event);
-
-	bool ignore_pmdown_time;  /* Doesn't benefit from pmdown delay */
 
 	/* probe ordering - for components with runtime dependencies */
 	int probe_order;
@@ -723,7 +696,6 @@ struct snd_soc_platform {
 	int id;
 	struct device *dev;
 	struct snd_soc_platform_driver *driver;
-	struct mutex mutex;
 
 	unsigned int suspended:1; /* platform is suspended */
 	unsigned int probed:1;
@@ -733,11 +705,6 @@ struct snd_soc_platform {
 	struct list_head card_list;
 
 	struct snd_soc_dapm_context dapm;
-
-#ifdef CONFIG_DEBUG_FS
-	struct dentry *debugfs_platform_root;
-	struct dentry *debugfs_dapm;
-#endif
 };
 
 struct snd_soc_dai_link {
@@ -805,7 +772,6 @@ struct snd_soc_card {
 
 	struct list_head list;
 	struct mutex mutex;
-	struct mutex dapm_mutex;
 
 	bool instantiated;
 
@@ -914,12 +880,6 @@ struct snd_soc_pcm_runtime {
 struct soc_mixer_control {
 	int min, max, platform_max;
 	unsigned int reg, rreg, shift, rshift, invert;
-};
-
-struct soc_bytes {
-	int base;
-	int num_regs;
-	u32 mask;
 };
 
 /* enumerated kcontrol */

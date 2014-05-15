@@ -376,12 +376,7 @@ static void synaptics_i2c_reschedule_work(struct synaptics_i2c *touch,
 
 	spin_lock_irqsave(&touch->lock, flags);
 
-	/*
-	 * If work is already scheduled then subsequent schedules will not
-	 * change the scheduled time that's why we have to cancel it first.
-	 */
-	__cancel_delayed_work(&touch->dwork);
-	schedule_delayed_work(&touch->dwork, delay);
+	mod_delayed_work(system_wq, &touch->dwork, delay);
 
 	spin_unlock_irqrestore(&touch->lock, flags);
 }
@@ -570,7 +565,7 @@ static int __devinit synaptics_i2c_probe(struct i2c_client *client,
 			 "Requesting IRQ: %d\n", touch->client->irq);
 
 		ret = request_irq(touch->client->irq, synaptics_i2c_irq,
-				  IRQ_TYPE_EDGE_FALLING,
+				  IRQF_DISABLED|IRQ_TYPE_EDGE_FALLING,
 				  DRIVER_NAME, touch);
 		if (ret) {
 			dev_warn(&touch->client->dev,
@@ -619,7 +614,7 @@ static int __devexit synaptics_i2c_remove(struct i2c_client *client)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int synaptics_i2c_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -672,7 +667,18 @@ static struct i2c_driver synaptics_i2c_driver = {
 	.id_table	= synaptics_i2c_id_table,
 };
 
-module_i2c_driver(synaptics_i2c_driver);
+static int __init synaptics_i2c_init(void)
+{
+	return i2c_add_driver(&synaptics_i2c_driver);
+}
+
+static void __exit synaptics_i2c_exit(void)
+{
+	i2c_del_driver(&synaptics_i2c_driver);
+}
+
+module_init(synaptics_i2c_init);
+module_exit(synaptics_i2c_exit);
 
 MODULE_DESCRIPTION("Synaptics I2C touchpad driver");
 MODULE_AUTHOR("Mike Rapoport, Igor Grinberg, Compulab");

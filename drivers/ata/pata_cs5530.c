@@ -26,7 +26,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <scsi/scsi_host.h>
@@ -330,7 +329,7 @@ static int cs5530_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 #ifdef CONFIG_PM
 static int cs5530_reinit_one(struct pci_dev *pdev)
 {
-	struct ata_host *host = dev_get_drvdata(&pdev->dev);
+	struct ata_host *host = pci_get_drvdata(pdev);
 	int rc;
 
 	rc = ata_pci_device_do_resume(pdev);
@@ -363,21 +362,10 @@ static struct pci_driver cs5530_pci_driver = {
 #endif
 };
 
-static int __init cs5530_init(void)
-{
-	return pci_register_driver(&cs5530_pci_driver);
-}
-
-static void __exit cs5530_exit(void)
-{
-	pci_unregister_driver(&cs5530_pci_driver);
-}
+module_pci_driver(cs5530_pci_driver);
 
 MODULE_AUTHOR("Alan Cox");
 MODULE_DESCRIPTION("low-level driver for the Cyrix/NS/AMD 5530");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, cs5530);
 MODULE_VERSION(DRV_VERSION);
-
-module_init(cs5530_init);
-module_exit(cs5530_exit);

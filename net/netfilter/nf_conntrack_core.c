@@ -55,6 +55,12 @@ int (*nfnetlink_parse_nat_setup_hook)(struct nf_conn *ct,
 				      const struct nlattr *attr) __read_mostly;
 EXPORT_SYMBOL_GPL(nfnetlink_parse_nat_setup_hook);
 
+int (*nf_nat_seq_adjust_hook)(struct sk_buff *skb,
+			      struct nf_conn *ct,
+			      enum ip_conntrack_info ctinfo,
+			      unsigned int protoff);
+EXPORT_SYMBOL_GPL(nf_nat_seq_adjust_hook);
+
 DEFINE_SPINLOCK(nf_conntrack_lock);
 EXPORT_SYMBOL_GPL(nf_conntrack_lock);
 
@@ -316,6 +322,7 @@ static void death_by_timeout(unsigned long ul_conntrack)
  * OR
  * - Caller must lock nf_conntrack_lock before calling this function
  */
+
 static struct nf_conntrack_tuple_hash *
 ____nf_conntrack_find(struct net *net, u16 zone,
 		      const struct nf_conntrack_tuple *tuple, u32 hash)
@@ -323,6 +330,9 @@ ____nf_conntrack_find(struct net *net, u16 zone,
 	struct nf_conntrack_tuple_hash *h;
 	struct hlist_nulls_node *n;
 	unsigned int bucket = hash_bucket(hash, net);
+#ifdef CONFIG_MACH_P4NOTE
+	unsigned long start_tick = jiffies;
+#endif
 
 	/* Disable BHs the entire time since we normally need to disable them
 	 * at least once for the stats anyway.
@@ -345,6 +355,10 @@ begin:
 	 */
 	if (get_nulls_value(n) != bucket) {
 		NF_CT_STAT_INC(net, search_restart);
+#ifdef CONFIG_MACH_P4NOTE
+		if (unlikely(time_after(jiffies, start_tick + 18 * HZ)))
+			panic("%s: too much repeat!!", __func__);
+#endif
 		goto begin;
 	}
 	local_bh_enable();
@@ -537,7 +551,7 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 	tstamp = nf_conn_tstamp_find(ct);
 	if (tstamp) {
 		if (skb->tstamp.tv64 == 0)
-			__net_timestamp((struct sk_buff *)skb);
+			__net_timestamp(skb);
 
 		tstamp->start = ktime_to_ns(skb->tstamp);
 	}
@@ -689,10 +703,7 @@ __nf_conntrack_alloc(struct net *net, u16 zone,
 	    unlikely(atomic_read(&net->ct.count) > nf_conntrack_max)) {
 		if (!early_drop(net, hash_bucket(hash, net))) {
 			atomic_dec(&net->ct.count);
-			if (net_ratelimit())
-				printk(KERN_WARNING
-				       "nf_conntrack: table full, dropping"
-				       " packet.\n");
+			net_warn_ratelimited("nf_conntrack: table full, dropping packet\n");
 			return ERR_PTR(-ENOMEM);
 		}
 	}
@@ -763,6 +774,7 @@ void nf_conntrack_free(struct nf_conn *ct)
 	nf_ct_ext_destroy(ct);
 	atomic_dec(&net->ct.count);
 	nf_ct_ext_free(ct);
+	del_timer(&ct->timeout);
 	kmem_cache_free(net->ct.nf_conntrack_cachep, ct);
 }
 EXPORT_SYMBOL_GPL(nf_conntrack_free);
@@ -828,7 +840,8 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 		__set_bit(IPS_EXPECTED_BIT, &ct->status);
 		ct->master = exp->master;
 		if (exp->helper) {
-			help = nf_ct_helper_ext_add(ct, GFP_ATOMIC);
+			help = nf_ct_helper_ext_add(ct, exp->helper,
+						    GFP_ATOMIC);
 			if (help)
 				rcu_assign_pointer(help->helper, exp->helper);
 		}
@@ -932,7 +945,6 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 	enum ip_conntrack_info ctinfo;
 	struct nf_conntrack_l3proto *l3proto;
 	struct nf_conntrack_l4proto *l4proto;
-	struct nf_conn_timeout *timeout_ext;
 	unsigned int *timeouts;
 	unsigned int dataoff;
 	u_int8_t protonum;
@@ -999,11 +1011,7 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 	NF_CT_ASSERT(skb->nfct);
 
 	/* Decide what timeout policy we want to apply to this flow. */
-	timeout_ext = nf_ct_timeout_find(ct);
-	if (timeout_ext)
-		timeouts = NF_CT_TIMEOUT_EXT_DATA(timeout_ext);
-	else
-		timeouts = l4proto->get_timeouts(net);
+	timeouts = nf_ct_timeout_lookup(net, ct, l4proto);
 
 	ret = l4proto->packet(ct, skb, dataoff, ctinfo, pf, hooknum, timeouts);
 	if (ret <= 0) {
@@ -1158,8 +1166,9 @@ static struct nf_ct_ext_type nf_ct_zone_extend __read_mostly = {
 int nf_ct_port_tuple_to_nlattr(struct sk_buff *skb,
 			       const struct nf_conntrack_tuple *tuple)
 {
-	NLA_PUT_BE16(skb, CTA_PROTO_SRC_PORT, tuple->src.u.tcp.port);
-	NLA_PUT_BE16(skb, CTA_PROTO_DST_PORT, tuple->dst.u.tcp.port);
+	if (nla_put_be16(skb, CTA_PROTO_SRC_PORT, tuple->src.u.tcp.port) ||
+	    nla_put_be16(skb, CTA_PROTO_DST_PORT, tuple->dst.u.tcp.port))
+		goto nla_put_failure;
 	return 0;
 
 nla_put_failure:
@@ -1224,6 +1233,8 @@ get_next_corpse(struct net *net, int (*iter)(struct nf_conn *i, void *data),
 	spin_lock_bh(&nf_conntrack_lock);
 	for (; *bucket < net->ct.htable_size; (*bucket)++) {
 		hlist_nulls_for_each_entry(h, n, &net->ct.hash[*bucket], hnnode) {
+			if (NF_CT_DIRECTION(h) != IP_CT_DIR_ORIGINAL)
+				continue;
 			ct = nf_ct_tuplehash_to_ctrack(h);
 			if (iter(ct, data))
 				goto found;
@@ -1341,8 +1352,6 @@ static void nf_conntrack_cleanup_init_net(void)
 	while (untrack_refs() > 0)
 		schedule();
 
-	nf_conntrack_helper_fini();
-	nf_conntrack_proto_fini();
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	nf_ct_extend_unregister(&nf_ct_zone_extend);
 #endif
@@ -1359,6 +1368,7 @@ static void nf_conntrack_cleanup_net(struct net *net)
 	}
 
 	nf_ct_free_hashtable(net->ct.hash, net->ct.htable_size);
+	nf_conntrack_helper_fini(net);
 	nf_conntrack_timeout_fini(net);
 	nf_conntrack_ecache_fini(net);
 	nf_conntrack_tstamp_fini(net);
@@ -1380,7 +1390,7 @@ void nf_conntrack_cleanup(struct net *net)
 	   netfilter framework.  Roll on, two-stage module
 	   delete... */
 	synchronize_net();
-
+	nf_conntrack_proto_fini(net);
 	nf_conntrack_cleanup_net(net);
 
 	if (net_eq(net, &init_net)) {
@@ -1504,15 +1514,6 @@ static int nf_conntrack_init_init_net(void)
 	printk(KERN_INFO "nf_conntrack version %s (%u buckets, %d max)\n",
 	       NF_CONNTRACK_VERSION, nf_conntrack_htable_size,
 	       nf_conntrack_max);
-
-	ret = nf_conntrack_proto_init();
-	if (ret < 0)
-		goto err_proto;
-
-	ret = nf_conntrack_helper_init();
-	if (ret < 0)
-		goto err_helper;
-
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	ret = nf_ct_extend_register(&nf_ct_zone_extend);
 	if (ret < 0)
@@ -1530,11 +1531,7 @@ static int nf_conntrack_init_init_net(void)
 
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 err_extend:
-	nf_conntrack_helper_fini();
 #endif
-err_helper:
-	nf_conntrack_proto_fini();
-err_proto:
 	return ret;
 }
 
@@ -1594,9 +1591,12 @@ static int nf_conntrack_init_net(struct net *net)
 	ret = nf_conntrack_timeout_init(net);
 	if (ret < 0)
 		goto err_timeout;
-
+	ret = nf_conntrack_helper_init(net);
+	if (ret < 0)
+		goto err_helper;
 	return 0;
-
+err_helper:
+	nf_conntrack_timeout_fini(net);
 err_timeout:
 	nf_conntrack_ecache_fini(net);
 err_ecache:
@@ -1631,6 +1631,9 @@ int nf_conntrack_init(struct net *net)
 		if (ret < 0)
 			goto out_init_net;
 	}
+	ret = nf_conntrack_proto_init(net);
+	if (ret < 0)
+		goto out_proto;
 	ret = nf_conntrack_init_net(net);
 	if (ret < 0)
 		goto out_net;
@@ -1646,6 +1649,8 @@ int nf_conntrack_init(struct net *net)
 	return 0;
 
 out_net:
+	nf_conntrack_proto_fini(net);
+out_proto:
 	if (net_eq(net, &init_net))
 		nf_conntrack_cleanup_init_net();
 out_init_net:

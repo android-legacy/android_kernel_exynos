@@ -1,8 +1,7 @@
 #ifndef _LINUX_MISCDEVICE_H
 #define _LINUX_MISCDEVICE_H
+#include <linux/module.h>
 #include <linux/major.h>
-#include <linux/list.h>
-#include <linux/types.h>
 
 /*
  *	These allocations are managed by device@lanana.org. If you use an
@@ -31,6 +30,7 @@
 #define I2O_MINOR		166
 #define MICROCODE_MINOR		184
 #define TUN_MINOR		200
+#define CUSE_MINOR		203
 #define MWAVE_MINOR		219	/* ACP/Mwave Modem */
 #define MPT_MINOR		220
 #define MPT2SAS_MINOR		221
@@ -42,7 +42,6 @@
 #define AUTOFS_MINOR		235
 #define MAPPER_CTRL_MINOR	236
 #define LOOP_CTRL_MINOR		237
-#define VHOST_NET_MINOR		238
 #define MISC_DYNAMIC_MINOR	255
 
 struct device;
@@ -55,7 +54,7 @@ struct miscdevice  {
 	struct device *parent;
 	struct device *this_device;
 	const char *nodename;
-	umode_t mode;
+	mode_t mode;
 };
 
 extern int misc_register(struct miscdevice * misc);

@@ -35,7 +35,7 @@
  ****************************************************************************/
 
 /* Registers:
- *  r4: vcpu pointer
+ *  none
  */
 _GLOBAL(__kvmppc_vcore_entry)
 
@@ -57,9 +57,11 @@ BEGIN_FTR_SECTION
 	std	r3, HSTATE_DSCR(r13)
 END_FTR_SECTION_IFSET(CPU_FTR_ARCH_206)
 
+BEGIN_FTR_SECTION
 	/* Save host DABR */
 	mfspr	r3, SPRN_DABR
 	std	r3, HSTATE_DABR(r13)
+END_FTR_SECTION_IFCLR(CPU_FTR_ARCH_207S)
 
 	/* Hard-disable interrupts */
 	mfmsr   r10
@@ -68,19 +70,23 @@ END_FTR_SECTION_IFSET(CPU_FTR_ARCH_206)
 	rotldi  r10,r10,16
 	mtmsrd  r10,1
 
-	/* Save host PMU registers and load guest PMU registers */
-	/* R4 is live here (vcpu pointer) but not r3 or r5 */
+	/* Save host PMU registers */
 	li	r3, 1
 	sldi	r3, r3, 31		/* MMCR0_FC (freeze counters) bit */
 	mfspr	r7, SPRN_MMCR0		/* save MMCR0 */
 	mtspr	SPRN_MMCR0, r3		/* freeze all counters, disable interrupts */
+	mfspr	r6, SPRN_MMCRA
+BEGIN_FTR_SECTION
+	/* On P7, clear MMCRA in order to disable SDAR updates */
+	li	r5, 0
+	mtspr	SPRN_MMCRA, r5
+END_FTR_SECTION_IFSET(CPU_FTR_ARCH_206)
 	isync
 	ld	r3, PACALPPACAPTR(r13)	/* is the host using the PMU? */
 	lbz	r5, LPPACA_PMCINUSE(r3)
 	cmpwi	r5, 0
 	beq	31f			/* skip if not */
 	mfspr	r5, SPRN_MMCR1
-	mfspr	r6, SPRN_MMCRA
 	std	r7, HSTATE_MMCR(r13)
 	std	r5, HSTATE_MMCR + 8(r13)
 	std	r6, HSTATE_MMCR + 16(r13)
@@ -117,25 +123,30 @@ END_FTR_SECTION_IFSET(CPU_FTR_ARCH_201)
 	add	r8,r8,r7
 	std	r8,HSTATE_DECEXP(r13)
 
+#ifdef CONFIG_SMP
 	/*
 	 * On PPC970, if the guest vcpu has an external interrupt pending,
 	 * send ourselves an IPI so as to interrupt the guest once it
 	 * enables interrupts.  (It must have interrupts disabled,
 	 * otherwise we would already have delivered the interrupt.)
+	 *
+	 * XXX If this is a UP build, smp_send_reschedule is not available,
+	 * so the interrupt will be delayed until the next time the vcpu
+	 * enters the guest with interrupts enabled.
 	 */
 BEGIN_FTR_SECTION
+	ld	r4, HSTATE_KVM_VCPU(r13)
 	ld	r0, VCPU_PENDING_EXC(r4)
 	li	r7, (1 << BOOK3S_IRQPRIO_EXTERNAL)
 	oris	r7, r7, (1 << BOOK3S_IRQPRIO_EXTERNAL_LEVEL)@h
 	and.	r0, r0, r7
 	beq	32f
-	mr	r31, r4
 	lhz	r3, PACAPACAINDEX(r13)
 	bl	smp_send_reschedule
 	nop
-	mr	r4, r31
 32:
 END_FTR_SECTION_IFSET(CPU_FTR_ARCH_201)
+#endif /* CONFIG_SMP */
 
 	/* Jump to partition switch code */
 	bl	.kvmppc_hv_entry_trampoline
@@ -146,9 +157,6 @@ END_FTR_SECTION_IFSET(CPU_FTR_ARCH_201)
  * with something that we can't handle in real mode.
  * Interrupts are enabled again at this point.
  */
-
-.global kvmppc_handler_highmem
-kvmppc_handler_highmem:
 
 	/*
 	 * Register usage at this point:

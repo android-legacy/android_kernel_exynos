@@ -17,7 +17,6 @@
 #include <linux/mm.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
-#include <linux/of_spi.h>
 #include <linux/interrupt.h>
 #include <linux/err.h>
 #include <sysdev/fsl_soc.h>
@@ -237,7 +236,7 @@ static int fsl_espi_bufs(struct spi_device *spi, struct spi_transfer *t)
 	mpc8xxx_spi->tx = t->tx_buf;
 	mpc8xxx_spi->rx = t->rx_buf;
 
-	INIT_COMPLETION(mpc8xxx_spi->done);
+	reinit_completion(&mpc8xxx_spi->done);
 
 	/* Set SPCOM[CS] and SPCOM[TRANLEN] field */
 	if ((t->len - 1) > SPCOM_TRANLEN_MAX) {
@@ -588,7 +587,7 @@ static void fsl_espi_remove(struct mpc8xxx_spi *mspi)
 	iounmap(mspi->reg_base);
 }
 
-static struct spi_master * __devinit fsl_espi_probe(struct device *dev,
+static struct spi_master * fsl_espi_probe(struct device *dev,
 		struct resource *mem, unsigned int irq)
 {
 	struct fsl_spi_platform_data *pdata = dev->platform_data;
@@ -687,7 +686,7 @@ static int of_fsl_espi_get_chipselects(struct device *dev)
 	return 0;
 }
 
-static int __devinit of_fsl_espi_probe(struct platform_device *ofdev)
+static int of_fsl_espi_probe(struct platform_device *ofdev)
 {
 	struct device *dev = &ofdev->dev;
 	struct device_node *np = ofdev->dev.of_node;
@@ -726,7 +725,7 @@ err:
 	return ret;
 }
 
-static int __devexit of_fsl_espi_remove(struct platform_device *dev)
+static int of_fsl_espi_remove(struct platform_device *dev)
 {
 	return mpc8xxx_spi_remove(&dev->dev);
 }
@@ -744,7 +743,7 @@ static struct platform_driver fsl_espi_driver = {
 		.of_match_table = of_fsl_espi_match,
 	},
 	.probe		= of_fsl_espi_probe,
-	.remove		= __devexit_p(of_fsl_espi_remove),
+	.remove		= of_fsl_espi_remove,
 };
 module_platform_driver(fsl_espi_driver);
 

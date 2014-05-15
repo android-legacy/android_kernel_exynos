@@ -223,7 +223,7 @@ static int cyttsp_soft_reset(struct cyttsp *ts)
 	int retval;
 
 	/* wait for interrupt to set ready completion */
-	INIT_COMPLETION(ts->bl_ready);
+	reinit_completion(&ts->bl_ready);
 	ts->state = CY_BL_STATE;
 
 	enable_irq(ts->irq);
@@ -571,7 +571,7 @@ struct cyttsp *cyttsp_probe(const struct cyttsp_bus_ops *bus_ops,
 	input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR,
 			     0, CY_MAXZ, 0, 0);
 
-	input_mt_init_slots(input_dev, CY_MAX_ID);
+	input_mt_init_slots(input_dev, CY_MAX_ID, 0);
 
 	error = request_threaded_irq(ts->irq, NULL, cyttsp_irq,
 				     IRQF_TRIGGER_FALLING | IRQF_ONESHOT,

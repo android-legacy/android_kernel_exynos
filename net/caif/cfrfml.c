@@ -184,11 +184,6 @@ out:
 					rfml->serv.dev_info.id);
 	}
 	spin_unlock(&rfml->sync);
-
-	if (unlikely(err == -EAGAIN))
-		/* It is not possible to recover after drop of a fragment */
-		err = -EIO;
-
 	return err;
 }
 
@@ -223,7 +218,7 @@ static int cfrfml_transmit(struct cflayer *layr, struct cfpkt *pkt)
 	caif_assert(layr->dn->transmit != NULL);
 
 	if (!cfsrvl_ready(&rfml->serv, &err))
-		goto out;
+		return err;
 
 	err = -EPROTO;
 	if (cfpkt_getlen(pkt) <= RFM_HEAD_SIZE-1)
@@ -256,11 +251,8 @@ static int cfrfml_transmit(struct cflayer *layr, struct cfpkt *pkt)
 
 		err = cfrfml_transmit_segment(rfml, frontpkt);
 
-		if (err != 0) {
-			frontpkt = NULL;
+		if (err != 0)
 			goto out;
-		}
-
 		frontpkt = rearpkt;
 		rearpkt = NULL;
 
@@ -294,8 +286,19 @@ out:
 		if (rearpkt)
 			cfpkt_destroy(rearpkt);
 
-		if (frontpkt)
+		if (frontpkt && frontpkt != pkt) {
+
 			cfpkt_destroy(frontpkt);
+			/*
+			 * Socket layer will free the original packet,
+			 * but this packet may already be sent and
+			 * freed. So we have to return 0 in this case
+			 * to avoid socket layer to re-free this packet.
+			 * The return of shutdown indication will
+			 * cause connection to be invalidated anyhow.
+			 */
+			err = 0;
+		}
 	}
 
 	return err;

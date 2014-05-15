@@ -3,7 +3,6 @@
  * It does not support slave mode, the register slightly moved. This PCI
  * device provides three bars, every contains a single I2C controller.
  */
-#include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <linux/i2c/pxa-i2c.h>
@@ -150,7 +149,7 @@ static void __devexit ce4100_i2c_remove(struct pci_dev *dev)
 	kfree(sds);
 }
 
-static DEFINE_PCI_DEVICE_TABLE(ce4100_i2c_devices) = {
+static struct pci_device_id ce4100_i2c_devices[] __devinitdata = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, 0x2e68)},
 	{ },
 };

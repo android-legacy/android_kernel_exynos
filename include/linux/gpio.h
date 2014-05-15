@@ -1,6 +1,8 @@
 #ifndef __LINUX_GPIO_H
 #define __LINUX_GPIO_H
 
+#include <linux/errno.h>
+
 /* see Documentation/gpio.txt */
 
 /* make these flag values available regardless of GPIO kconfig options */
@@ -16,22 +18,6 @@
 
 /* Gpio pin is open drain */
 #define GPIOF_OPEN_DRAIN	(1 << 2)
-
-/* Gpio pin is open source */
-#define GPIOF_OPEN_SOURCE	(1 << 3)
-
-/**
- * struct gpio - a structure describing a GPIO with configuration
- * @gpio:	the GPIO number
- * @flags:	GPIO configuration as specified by GPIOF_*
- * @label:	a literal description string of this GPIO
- */
-struct gpio {
-	unsigned	gpio;
-	unsigned long	flags;
-	const char	*label;
-};
-
 #ifdef CONFIG_GENERIC_GPIO
 #include <asm/gpio.h>
 
@@ -43,7 +29,17 @@ struct gpio {
 #include <linux/bug.h>
 
 struct device;
+struct gpio;
 struct gpio_chip;
+
+/*
+ * Some platforms don't support the GPIO programming interface.
+ *
+ * In case some driver uses it anyway (it should normally have
+ * depended on GENERIC_GPIO), these routines help the compiler
+ * optimize out much GPIO-related code ... or trigger a runtime
+ * warning when something is wrongly called.
+ */
 
 static inline bool gpio_is_valid(int number)
 {

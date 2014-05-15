@@ -15,6 +15,9 @@ menuconfig BLK_DEV
 
 if BLK_DEV
 
+config BLK_DEV_NULL_BLK
+	tristate "Null test block driver"
+
 config BLK_DEV_FD
 	tristate "Normal floppy disk support"
 	depends on ARCH_MAY_HAVE_PC_FDC
@@ -116,11 +119,9 @@ config PARIDE
 
 source "drivers/block/paride/Kconfig"
 
-source "drivers/block/mtip32xx/Kconfig"
-
 config BLK_CPQ_DA
 	tristate "Compaq SMART2 support"
-	depends on PCI && VIRT_TO_BUS
+	depends on PCI && VIRT_TO_BUS && 0
 	help
 	  This is the driver for Compaq Smart Array controllers.  Everyone
 	  using these boards should say Y here.  See the file
@@ -289,6 +290,9 @@ config BLK_DEV_CRYPTOLOOP
 	  cryptoloop device.
 
 source "drivers/block/drbd/Kconfig"
+source "drivers/block/snappy/Kconfig"
+source "drivers/block/zram/Kconfig"
+source "drivers/block/eds/Kconfig"
 
 config BLK_DEV_NBD
 	tristate "Network block device support"
@@ -328,6 +332,16 @@ config BLK_DEV_NVME
 	  To compile this driver as a module, choose M here: the
 	  module will be called nvme.
 
+config BLK_DEV_SKD
+	tristate "STEC S1120 Block Driver"
+	depends on PCI
+	depends on 64BIT
+	---help---
+	Saying Y or M here will enable support for the
+	STEC, Inc. S1120 PCIe SSD.
+
+	Use device /dev/skd$N amd /dev/skd$Np$M.
+
 config BLK_DEV_OSD
 	tristate "OSD object-as-blkdev support"
 	depends on SCSI_OSD_ULD
@@ -354,7 +368,7 @@ config BLK_DEV_SX8
 	  Use devices /dev/sx8/$N and /dev/sx8/$Np$M.
 
 config BLK_DEV_UB
-	tristate "Low Performance USB Block driver (deprecated)"
+	tristate "Low Performance USB Block driver"
 	depends on USB
 	help
 	  This driver supports certain USB attached storage devices

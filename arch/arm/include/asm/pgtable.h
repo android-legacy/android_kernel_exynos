@@ -22,7 +22,10 @@
 
 #include <asm-generic/pgtable-nopud.h>
 #include <asm/memory.h>
+#include <mach/vmalloc.h>
 #include <asm/pgtable-hwdef.h>
+
+#include <asm/tlbflush.h>
 
 #ifdef CONFIG_ARM_LPAE
 #include <asm/pgtable-3level.h>
@@ -37,10 +40,22 @@
  * any out-of-bounds memory accesses will hopefully be caught.
  * The vmalloc() routines leaves a hole of 4kB between each vmalloced
  * area for the same reason. ;)
+ *
+ * Note that platforms may override VMALLOC_START, but they must provide
+ * VMALLOC_END.  VMALLOC_END defines the (exclusive) limit of this space,
+ * which may not overlap IO space.
  */
+#ifndef VMALLOC_START
 #define VMALLOC_OFFSET		(8*1024*1024)
 #define VMALLOC_START		(((unsigned long)high_memory + VMALLOC_OFFSET) & ~(VMALLOC_OFFSET-1))
-#define VMALLOC_END		0xff000000UL
+#endif
+
+/* This is a temporary hack until shmobile's DMA area size is sorted out */
+#ifdef CONFIG_ARCH_SHMOBILE
+#warning "SH-Mobile's consistent DMA size conflicts with VMALLOC_END by 144MB"
+#undef VMALLOC_END
+#define VMALLOC_END		0xF6000000UL
+#endif
 
 #define LIBRARY_TEXT_START	0x0c000000
 
@@ -58,7 +73,16 @@ extern void __pgd_error(const char *file, int line, pgd_t);
  * mapping to be mapped at.  This is particularly important for
  * non-high vector CPUs.
  */
-#define FIRST_USER_ADDRESS	PAGE_SIZE
+#define FIRST_USER_ADDRESS	(PAGE_SIZE * 2)
+
+/*
+ * Use TASK_SIZE as the ceiling argument for free_pgtables() and
+ * free_pgd_range() to avoid freeing the modules pmd when LPAE is enabled (pmd
+ * page shared between user and kernel).
+ */
+#ifdef CONFIG_ARM_LPAE
+#define USER_PGTABLES_CEILING	TASK_SIZE
+#endif
 
 /*
  * The pgprot_* and protection_map entries will be fixed up in runtime
@@ -70,10 +94,13 @@ extern void __pgd_error(const char *file, int line, pgd_t);
 
 extern pgprot_t		pgprot_user;
 extern pgprot_t		pgprot_kernel;
+extern pgprot_t		pgprot_hyp_device;
+extern pgprot_t		pgprot_s2;
+extern pgprot_t		pgprot_s2_device;
 
 #define _MOD_PROT(p, b)	__pgprot(pgprot_val(p) | (b))
 
-#define PAGE_NONE		_MOD_PROT(pgprot_user, L_PTE_XN | L_PTE_RDONLY)
+#define PAGE_NONE		_MOD_PROT(pgprot_user, L_PTE_XN | L_PTE_RDONLY | L_PTE_NONE)
 #define PAGE_SHARED		_MOD_PROT(pgprot_user, L_PTE_USER | L_PTE_XN)
 #define PAGE_SHARED_EXEC	_MOD_PROT(pgprot_user, L_PTE_USER)
 #define PAGE_COPY		_MOD_PROT(pgprot_user, L_PTE_USER | L_PTE_RDONLY | L_PTE_XN)
@@ -82,8 +109,12 @@ extern pgprot_t		pgprot_kernel;
 #define PAGE_READONLY_EXEC	_MOD_PROT(pgprot_user, L_PTE_USER | L_PTE_RDONLY)
 #define PAGE_KERNEL		_MOD_PROT(pgprot_kernel, L_PTE_XN)
 #define PAGE_KERNEL_EXEC	pgprot_kernel
+#define PAGE_HYP		_MOD_PROT(pgprot_kernel, L_PTE_HYP)
+#define PAGE_HYP_DEVICE		_MOD_PROT(pgprot_hyp_device, L_PTE_HYP)
+#define PAGE_S2			_MOD_PROT(pgprot_s2, L_PTE_S2_RDONLY)
+#define PAGE_S2_DEVICE		_MOD_PROT(pgprot_s2_device, L_PTE_USER | L_PTE_S2_RDONLY)
 
-#define __PAGE_NONE		__pgprot(_L_PTE_DEFAULT | L_PTE_RDONLY | L_PTE_XN)
+#define __PAGE_NONE		__pgprot(_L_PTE_DEFAULT | L_PTE_RDONLY | L_PTE_XN | L_PTE_NONE)
 #define __PAGE_SHARED		__pgprot(_L_PTE_DEFAULT | L_PTE_USER | L_PTE_XN)
 #define __PAGE_SHARED_EXEC	__pgprot(_L_PTE_DEFAULT | L_PTE_USER)
 #define __PAGE_COPY		__pgprot(_L_PTE_DEFAULT | L_PTE_USER | L_PTE_RDONLY | L_PTE_XN)
@@ -203,9 +234,7 @@ static inline pte_t *pmd_page_vaddr(pmd_t pmd)
 #define pte_exec(pte)		(!(pte_val(pte) & L_PTE_XN))
 #define pte_special(pte)	(0)
 
-#define pte_present_user(pte) \
-	((pte_val(pte) & (L_PTE_PRESENT | L_PTE_USER)) == \
-	 (L_PTE_PRESENT | L_PTE_USER))
+#define pte_present_user(pte)  (pte_present(pte) && (pte_val(pte) & L_PTE_USER))
 
 #if __LINUX_ARM_ARCH__ < 6
 static inline void __sync_icache_dcache(pte_t pteval)
@@ -242,7 +271,8 @@ static inline pte_t pte_mkspecial(pte_t pte) { return pte; }
 
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
-	const pteval_t mask = L_PTE_XN | L_PTE_RDONLY | L_PTE_USER;
+	const pteval_t mask = L_PTE_XN | L_PTE_RDONLY | L_PTE_USER |
+		L_PTE_NONE | L_PTE_VALID;
 	pte_val(pte) = (pte_val(pte) & ~mask) | (pgprot_val(newprot) & mask);
 	return pte;
 }

@@ -15,7 +15,6 @@
 #include <linux/crypto.h>
 #include <linux/list.h>
 #include <linux/kernel.h>
-#include <linux/skbuff.h>
 
 struct module;
 struct rtattr;
@@ -27,7 +26,6 @@ struct crypto_type {
 	int (*init)(struct crypto_tfm *tfm, u32 type, u32 mask);
 	int (*init_tfm)(struct crypto_tfm *tfm);
 	void (*show)(struct seq_file *m, struct crypto_alg *alg);
-	int (*report)(struct sk_buff *skb, struct crypto_alg *alg);
 	struct crypto_alg *(*lookup)(const char *name, u32 type, u32 mask);
 
 	unsigned int type;
@@ -134,7 +132,6 @@ struct crypto_template *crypto_lookup_template(const char *name);
 
 int crypto_register_instance(struct crypto_template *tmpl,
 			     struct crypto_instance *inst);
-int crypto_unregister_instance(struct crypto_alg *alg);
 
 int crypto_init_spawn(struct crypto_spawn *spawn, struct crypto_alg *alg,
 		      struct crypto_instance *inst, u32 mask);
@@ -307,6 +304,7 @@ static inline void blkcipher_walk_init(struct blkcipher_walk *walk,
 	walk->in.sg = src;
 	walk->out.sg = dst;
 	walk->total = nbytes;
+	walk->flags = 0;
 }
 
 static inline void ablkcipher_walk_init(struct ablkcipher_walk *walk,
@@ -386,5 +384,21 @@ static inline int crypto_requires_sync(u32 type, u32 mask)
 	return (type ^ CRYPTO_ALG_ASYNC) & mask & CRYPTO_ALG_ASYNC;
 }
 
-#endif	/* _CRYPTO_ALGAPI_H */
+noinline unsigned long __crypto_memneq(const void *a, const void *b, size_t size);
 
+/**
+ * crypto_memneq - Compare two areas of memory without leaking
+ *		   timing information.
+ *
+ * @a: One area of memory
+ * @b: Another area of memory
+ * @size: The size of the area.
+ *
+ * Returns 0 when data is equal, 1 otherwise.
+ */
+static inline int crypto_memneq(const void *a, const void *b, size_t size)
+{
+	return __crypto_memneq(a, b, size) != 0UL ? 1 : 0;
+}
+
+#endif	/* _CRYPTO_ALGAPI_H */

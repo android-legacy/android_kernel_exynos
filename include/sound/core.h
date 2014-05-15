@@ -26,6 +26,7 @@
 #include <linux/mutex.h>		/* struct mutex */
 #include <linux/rwsem.h>		/* struct rw_semaphore */
 #include <linux/pm.h>			/* pm_message_t */
+#include <linux/device.h>
 #include <linux/stringify.h>
 
 /* number of supported soundcards */
@@ -38,10 +39,10 @@
 #define CONFIG_SND_MAJOR	116	/* standard configuration */
 
 /* forward declarations */
+#ifdef CONFIG_PCI
 struct pci_dev;
+#endif
 struct module;
-struct device;
-struct device_attribute;
 
 /* device allocation stuff */
 
@@ -328,13 +329,6 @@ void release_and_free_resource(struct resource *res);
 
 /* --- */
 
-/* sound printk debug levels */
-enum {
-	SND_PR_ALWAYS,
-	SND_PR_DEBUG,
-	SND_PR_VERBOSE,
-};
-
 #if defined(CONFIG_SND_DEBUG) || defined(CONFIG_SND_VERBOSE_PRINTK)
 __printf(4, 5)
 void __snd_printk(unsigned int level, const char *file, int line,
@@ -364,8 +358,6 @@ void __snd_printk(unsigned int level, const char *file, int line,
  */
 #define snd_printd(fmt, args...) \
 	__snd_printk(1, __FILE__, __LINE__, fmt, ##args)
-#define _snd_printd(level, fmt, args...) \
-	__snd_printk(level, __FILE__, __LINE__, fmt, ##args)
 
 /**
  * snd_BUG - give a BUG warning message and stack trace
@@ -395,7 +387,6 @@ void __snd_printk(unsigned int level, const char *file, int line,
 #else /* !CONFIG_SND_DEBUG */
 
 #define snd_printd(fmt, args...)	do { } while (0)
-#define _snd_printd(level, fmt, args...) do { } while (0)
 #define snd_BUG()			do { } while (0)
 static inline int __snd_bug_on(int cond)
 {
@@ -429,7 +420,6 @@ static inline int __snd_bug_on(int cond)
 #define gameport_get_port_data(gp) (gp)->port_data
 #endif
 
-#ifdef CONFIG_PCI
 /* PCI quirk list helper */
 struct snd_pci_quirk {
 	unsigned short subvendor;	/* PCI subvendor ID */
@@ -469,6 +459,5 @@ snd_pci_quirk_lookup(struct pci_dev *pci, const struct snd_pci_quirk *list);
 const struct snd_pci_quirk *
 snd_pci_quirk_lookup_id(u16 vendor, u16 device,
 			const struct snd_pci_quirk *list);
-#endif
 
 #endif /* __SOUND_CORE_H */

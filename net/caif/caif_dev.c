@@ -4,8 +4,7 @@
  * Author:	Sjur Brendeland/sjur.brandeland@stericsson.com
  * License terms: GNU General Public License (GPL) version 2
  *
- * Borrowed heavily from file: pn_dev.c. Thanks to
- *  Remi Denis-Courmont <remi.denis-courmont@nokia.com>
+ * Borrowed heavily from file: pn_dev.c. Thanks to Remi Denis-Courmont
  *  and Sakari Ailus <sakari.ailus@nokia.com>
  */
 
@@ -91,10 +90,7 @@ static int caifd_refcnt_read(struct caif_device_entry *e)
 /* Allocate new CAIF device. */
 static struct caif_device_entry *caif_device_alloc(struct net_device *dev)
 {
-	struct caif_device_entry_list *caifdevs;
 	struct caif_device_entry *caifd;
-
-	caifdevs = caif_device_list(dev_net(dev));
 
 	caifd = kzalloc(sizeof(*caifd), GFP_KERNEL);
 	if (!caifd)
@@ -132,6 +128,11 @@ void caif_flow_cb(struct sk_buff *skb)
 
 	rcu_read_lock();
 	caifd = caif_get(skb->dev);
+
+	WARN_ON(caifd == NULL);
+	if (caifd == NULL)
+		return;
+
 	caifd_hold(caifd);
 	rcu_read_unlock();
 
@@ -162,6 +163,7 @@ void caif_flow_cb(struct sk_buff *skb)
 static int transmit(struct cflayer *layer, struct cfpkt *pkt)
 {
 	int err, high = 0, qlen = 0;
+	struct caif_dev_common *caifdev;
 	struct caif_device_entry *caifd =
 	    container_of(layer, struct caif_device_entry, layer);
 	struct sk_buff *skb;
@@ -173,6 +175,7 @@ static int transmit(struct cflayer *layer, struct cfpkt *pkt)
 	skb->dev = caifd->netdev;
 	skb_reset_network_header(skb);
 	skb->protocol = htons(ETH_P_CAIF);
+	caifdev = netdev_priv(caifd->netdev);
 
 	/* Check if we need to handle xoff */
 	if (likely(caifd->netdev->tx_queue_len == 0))

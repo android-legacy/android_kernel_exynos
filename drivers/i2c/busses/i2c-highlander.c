@@ -387,7 +387,7 @@ static int __devinit highlander_i2c_probe(struct platform_device *pdev)
 		dev->irq = 0;
 
 	if (dev->irq) {
-		ret = request_irq(dev->irq, highlander_i2c_irq, 0,
+		ret = request_irq(dev->irq, highlander_i2c_irq, IRQF_DISABLED,
 				  pdev->name, dev);
 		if (unlikely(ret))
 			goto err_unmap;
@@ -468,7 +468,18 @@ static struct platform_driver highlander_i2c_driver = {
 	.remove		= __devexit_p(highlander_i2c_remove),
 };
 
-module_platform_driver(highlander_i2c_driver);
+static int __init highlander_i2c_init(void)
+{
+	return platform_driver_register(&highlander_i2c_driver);
+}
+
+static void __exit highlander_i2c_exit(void)
+{
+	platform_driver_unregister(&highlander_i2c_driver);
+}
+
+module_init(highlander_i2c_init);
+module_exit(highlander_i2c_exit);
 
 MODULE_AUTHOR("Paul Mundt");
 MODULE_DESCRIPTION("Renesas Highlander FPGA I2C/SMBus adapter");

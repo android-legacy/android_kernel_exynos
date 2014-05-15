@@ -48,9 +48,36 @@ static DEFINE_RAW_SPINLOCK(cpu_asid_lock);
 static atomic64_t asid_generation = ATOMIC64_INIT(ASID_FIRST_VERSION);
 static DECLARE_BITMAP(asid_map, NUM_USER_ASIDS);
 
-DEFINE_PER_CPU(atomic64_t, active_asids);
+static DEFINE_PER_CPU(atomic64_t, active_asids);
 static DEFINE_PER_CPU(u64, reserved_asids);
 static cpumask_t tlb_flush_pending;
+
+#ifdef CONFIG_ARM_ERRATA_798181
+void a15_erratum_get_cpumask(int this_cpu, struct mm_struct *mm,
+			     cpumask_t *mask)
+{
+	int cpu;
+	unsigned long flags;
+	u64 context_id, asid;
+
+	raw_spin_lock_irqsave(&cpu_asid_lock, flags);
+	context_id = mm->context.id.counter;
+	for_each_online_cpu(cpu) {
+		if (cpu == this_cpu)
+			continue;
+		/*
+		 * We only need to send an IPI if the other CPUs are
+		 * running the same ASID as the one being invalidated.
+		 */
+		asid = per_cpu(active_asids, cpu).counter;
+		if (asid == 0)
+			asid = per_cpu(reserved_asids, cpu);
+		if (context_id == asid)
+			cpumask_set_cpu(cpu, mask);
+	}
+	raw_spin_unlock_irqrestore(&cpu_asid_lock, flags);
+}
+#endif
 
 #ifdef CONFIG_ARM_LPAE
 static void cpu_set_reserved_ttbr0(void)
@@ -134,10 +161,7 @@ static void flush_context(unsigned int cpu)
 	}
 
 	/* Queue a TLB invalidate and flush the I-cache if necessary. */
-	if (!tlb_ops_need_broadcast())
-		cpumask_set_cpu(cpu, &tlb_flush_pending);
-	else
-		cpumask_setall(&tlb_flush_pending);
+	cpumask_setall(&tlb_flush_pending);
 
 	if (icache_is_vivt_asid_tagged())
 		__flush_icache_all();
@@ -215,7 +239,6 @@ void check_and_switch_context(struct mm_struct *mm, struct task_struct *tsk)
 	if (cpumask_test_and_clear_cpu(cpu, &tlb_flush_pending)) {
 		local_flush_bp_all();
 		local_flush_tlb_all();
-		dummy_flush_tlb_a15_erratum();
 	}
 
 	atomic64_set(&per_cpu(active_asids, cpu), asid);

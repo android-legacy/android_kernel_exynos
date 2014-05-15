@@ -33,14 +33,6 @@
 #error KEXEC_ARCH not defined
 #endif
 
-#ifndef KEXEC_CRASH_CONTROL_MEMORY_LIMIT
-#define KEXEC_CRASH_CONTROL_MEMORY_LIMIT KEXEC_CONTROL_MEMORY_LIMIT
-#endif
-
-#ifndef KEXEC_CRASH_MEM_ALIGN
-#define KEXEC_CRASH_MEM_ALIGN PAGE_SIZE
-#endif
-
 #define KEXEC_NOTE_HEAD_BYTES ALIGN(sizeof(struct elf_note), 4)
 #define KEXEC_CORE_NOTE_NAME "CORE"
 #define KEXEC_CORE_NOTE_NAME_BYTES ALIGN(sizeof(KEXEC_CORE_NOTE_NAME), 4)
@@ -50,11 +42,9 @@
  * note header.  For kdump, the code in vmcore.c runs in the context
  * of the second kernel to combine them into one note.
  */
-#ifndef KEXEC_NOTE_BYTES
 #define KEXEC_NOTE_BYTES ( (KEXEC_NOTE_HEAD_BYTES * 2) +		\
 			    KEXEC_CORE_NOTE_NAME_BYTES +		\
 			    KEXEC_CORE_NOTE_DESC_BYTES )
-#endif
 
 /*
  * This structure is used to hold the arguments that are used when loading
@@ -127,20 +117,12 @@ extern asmlinkage long sys_kexec_load(unsigned long entry,
 					struct kexec_segment __user *segments,
 					unsigned long flags);
 extern int kernel_kexec(void);
-#ifdef CONFIG_COMPAT
-extern asmlinkage long compat_sys_kexec_load(unsigned long entry,
-				unsigned long nr_segments,
-				struct compat_kexec_segment __user *segments,
-				unsigned long flags);
-#endif
 extern struct page *kimage_alloc_control_pages(struct kimage *image,
 						unsigned int order);
 extern void crash_kexec(struct pt_regs *);
 int kexec_should_crash(struct task_struct *);
 void crash_save_cpu(struct pt_regs *regs, int cpu);
 void crash_save_vmcoreinfo(void);
-void crash_map_reserved_pages(void);
-void crash_unmap_reserved_pages(void);
 void arch_crash_save_vmcoreinfo(void);
 __printf(1, 2)
 void vmcoreinfo_append_str(const char *fmt, ...);
@@ -170,6 +152,7 @@ unsigned long paddr_vmcoreinfo_note(void);
 
 extern struct kimage *kexec_image;
 extern struct kimage *kexec_crash_image;
+extern int kexec_load_disabled;
 
 #ifndef kexec_flush_icache_page
 #define kexec_flush_icache_page(page)
@@ -215,6 +198,9 @@ extern note_buf_t __percpu *crash_notes;
 extern u32 vmcoreinfo_note[VMCOREINFO_NOTE_SIZE/4];
 extern size_t vmcoreinfo_size;
 extern size_t vmcoreinfo_max_size;
+
+/* flag to track if kexec reboot is in progress */
+extern bool kexec_in_progress;
 
 int __init parse_crashkernel(char *cmdline, unsigned long long system_ram,
 		unsigned long long *crash_size, unsigned long long *crash_base);

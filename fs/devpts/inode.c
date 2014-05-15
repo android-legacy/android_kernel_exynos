@@ -98,8 +98,8 @@ static struct vfsmount *devpts_mnt;
 struct pts_mount_opts {
 	int setuid;
 	int setgid;
-	uid_t   uid;
-	gid_t   gid;
+	kuid_t   uid;
+	kgid_t   gid;
 	umode_t mode;
 	umode_t ptmxmode;
 	int newinstance;
@@ -158,11 +158,13 @@ static inline struct super_block *pts_sb_from_inode(struct inode *inode)
 static int parse_mount_options(char *data, int op, struct pts_mount_opts *opts)
 {
 	char *p;
+	kuid_t uid;
+	kgid_t gid;
 
 	opts->setuid  = 0;
 	opts->setgid  = 0;
-	opts->uid     = 0;
-	opts->gid     = 0;
+	opts->uid     = GLOBAL_ROOT_UID;
+	opts->gid     = GLOBAL_ROOT_GID;
 	opts->mode    = DEVPTS_DEFAULT_MODE;
 	opts->ptmxmode = DEVPTS_DEFAULT_PTMX_MODE;
 	opts->max     = NR_UNIX98_PTY_MAX;
@@ -184,13 +186,19 @@ static int parse_mount_options(char *data, int op, struct pts_mount_opts *opts)
 		case Opt_uid:
 			if (match_int(&args[0], &option))
 				return -EINVAL;
-			opts->uid = option;
+			uid = make_kuid(current_user_ns(), option);
+			if (!uid_valid(uid))
+				return -EINVAL;
+			opts->uid = uid;
 			opts->setuid = 1;
 			break;
 		case Opt_gid:
 			if (match_int(&args[0], &option))
 				return -EINVAL;
-			opts->gid = option;
+			gid = make_kgid(current_user_ns(), option);
+			if (!gid_valid(gid))
+				return -EINVAL;
+			opts->gid = gid;
 			opts->setgid = 1;
 			break;
 		case Opt_mode:
@@ -235,6 +243,13 @@ static int mknod_ptmx(struct super_block *sb)
 	struct dentry *root = sb->s_root;
 	struct pts_fs_info *fsi = DEVPTS_SB(sb);
 	struct pts_mount_opts *opts = &fsi->mount_opts;
+	kuid_t root_uid;
+	kgid_t root_gid;
+
+	root_uid = make_kuid(current_user_ns(), 0);
+	root_gid = make_kgid(current_user_ns(), 0);
+	if (!uid_valid(root_uid) || !gid_valid(root_gid))
+		return -EINVAL;
 
 	mutex_lock(&root->d_inode->i_mutex);
 
@@ -265,6 +280,8 @@ static int mknod_ptmx(struct super_block *sb)
 
 	mode = S_IFCHR|opts->ptmxmode;
 	init_special_inode(inode, mode, MKDEV(TTYAUX_MAJOR, 2));
+	inode->i_uid = root_uid;
+	inode->i_gid = root_gid;
 
 	d_add(dentry, inode);
 
@@ -315,9 +332,9 @@ static int devpts_show_options(struct seq_file *seq, struct dentry *root)
 	struct pts_mount_opts *opts = &fsi->mount_opts;
 
 	if (opts->setuid)
-		seq_printf(seq, ",uid=%u", opts->uid);
+		seq_printf(seq, ",uid=%u", from_kuid_munged(&init_user_ns, opts->uid));
 	if (opts->setgid)
-		seq_printf(seq, ",gid=%u", opts->gid);
+		seq_printf(seq, ",gid=%u", from_kgid_munged(&init_user_ns, opts->gid));
 	seq_printf(seq, ",mode=%03o", opts->mode);
 #ifdef CONFIG_DEVPTS_MULTIPLE_INSTANCES
 	seq_printf(seq, ",ptmxmode=%03o", opts->ptmxmode);
@@ -430,16 +447,22 @@ static struct dentry *devpts_mount(struct file_system_type *fs_type,
 	if (error)
 		return ERR_PTR(error);
 
+	/* Require newinstance for all user namespace mounts to ensure
+	 * the mount options are not changed.
+	 */
+	if ((current_user_ns() != &init_user_ns) && !opts.newinstance)
+		return ERR_PTR(-EINVAL);
+
 	if (opts.newinstance)
-		s = sget(fs_type, NULL, set_anon_super, NULL);
+		s = sget(fs_type, NULL, set_anon_super, flags, NULL);
 	else
-		s = sget(fs_type, compare_init_pts_sb, set_anon_super, NULL);
+		s = sget(fs_type, compare_init_pts_sb, set_anon_super, flags,
+			 NULL);
 
 	if (IS_ERR(s))
 		return ERR_CAST(s);
 
 	if (!s->s_root) {
-		s->s_flags = flags;
 		error = devpts_fill_super(s, data, flags & MS_SILENT ? 1 : 0);
 		if (error)
 			goto out_undo_sget;
@@ -475,6 +498,7 @@ static void devpts_kill_sb(struct super_block *sb)
 {
 	struct pts_fs_info *fsi = DEVPTS_SB(sb);
 
+	ida_destroy(&fsi->allocated_ptys);
 	kfree(fsi);
 	kill_litter_super(sb);
 }
@@ -483,7 +507,11 @@ static struct file_system_type devpts_fs_type = {
 	.name		= "devpts",
 	.mount		= devpts_mount,
 	.kill_sb	= devpts_kill_sb,
+#ifdef CONFIG_DEVPTS_MULTIPLE_INSTANCES
+	.fs_flags	= FS_USERNS_MOUNT | FS_USERNS_DEV_MOUNT,
+#endif
 };
+MODULE_ALIAS_FS("devpts");
 
 /*
  * The normal naming convention is simply /dev/pts/<number>; this conforms

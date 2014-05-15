@@ -16,12 +16,15 @@
 #include <linux/freezer.h>
 #include <linux/delay.h>
 #include <linux/workqueue.h>
+#include <linux/wakelock.h>
 #include <linux/kmod.h>
+
+#include "power.h"
 
 /* 
  * Timeout for stopping processes
  */
-#define TIMEOUT	(20 * HZ)
+unsigned int __read_mostly freeze_timeout_msecs = 20 * MSEC_PER_SEC;
 
 static int try_to_freeze_tasks(bool user_only)
 {
@@ -37,7 +40,7 @@ static int try_to_freeze_tasks(bool user_only)
 
 	do_gettimeofday(&start);
 
-	end_time = jiffies + TIMEOUT;
+	end_time = jiffies + msecs_to_jiffies(freeze_timeout_msecs);
 
 	if (!user_only)
 		freeze_workqueues_begin();
@@ -49,18 +52,7 @@ static int try_to_freeze_tasks(bool user_only)
 			if (p == current || !freeze_task(p))
 				continue;
 
-			/*
-			 * Now that we've done set_freeze_flag, don't
-			 * perturb a task in TASK_STOPPED or TASK_TRACED.
-			 * It is "frozen enough".  If the task does wake
-			 * up, it will immediately call try_to_freeze.
-			 *
-			 * Because freeze_task() goes through p's scheduler lock, it's
-			 * guaranteed that TASK_STOPPED/TRACED -> TASK_RUNNING
-			 * transition can't race with task state testing here.
-			 */
-			if (!task_is_stopped_or_traced(p) &&
-			    !freezer_should_skip(p))
+			if (!freezer_should_skip(p))
 				todo++;
 		} while_each_thread(g, p);
 		read_unlock(&tasklist_lock);
@@ -70,6 +62,10 @@ static int try_to_freeze_tasks(bool user_only)
 			todo += wq_busy;
 		}
 
+		if (todo && has_wake_lock(WAKE_LOCK_SUSPEND)) {
+			wakeup = 1;
+			break;
+		}
 		if (!todo || time_after(jiffies, end_time))
 			break;
 
@@ -94,18 +90,25 @@ static int try_to_freeze_tasks(bool user_only)
 	elapsed_msecs = elapsed_msecs64;
 
 	if (todo) {
-		printk("\n");
-		printk(KERN_ERR "Freezing of tasks %s after %d.%03d seconds "
-		       "(%d tasks refusing to freeze, wq_busy=%d):\n",
-		       wakeup ? "aborted" : "failed",
-		       elapsed_msecs / 1000, elapsed_msecs % 1000,
-		       todo - wq_busy, wq_busy);
+		if (wakeup) {
+			printk("\n");
+			printk(KERN_ERR "Freezing of %s aborted\n",
+					user_only ? "user space " : "tasks ");
+		} else {
+			printk("\n");
+			printk(KERN_ERR "Freezing of tasks %s after %d.%03d seconds "
+				"(%d tasks refusing to freeze, wq_busy=%d):\n",
+				user_only ? "user space " : "tasks ",
+				elapsed_msecs / 1000, elapsed_msecs % 1000,
+				todo - wq_busy, wq_busy);
+		}
 
 		if (!wakeup) {
 			read_lock(&tasklist_lock);
 			do_each_thread(g, p) {
 				if (p != current && !freezer_should_skip(p)
-				    && freezing(p) && !frozen(p))
+					&& freezing(p) && !frozen(p) &&
+					elapsed_msecs > 1000)
 					sched_show_task(p);
 			} while_each_thread(g, p);
 			read_unlock(&tasklist_lock);
@@ -120,6 +123,8 @@ static int try_to_freeze_tasks(bool user_only)
 
 /**
  * freeze_processes - Signal user space processes to enter the refrigerator.
+ * The current thread will not be frozen.  The same process that calls
+ * freeze_processes must later call thaw_processes.
  *
  * On success, returns 0.  On failure, -errno and system is fully thawed.
  */
@@ -130,6 +135,9 @@ int freeze_processes(void)
 	error = __usermodehelper_disable(UMH_FREEZING);
 	if (error)
 		return error;
+
+	/* Make sure this task doesn't get frozen */
+	current->flags |= PF_SUSPEND_TASK;
 
 	if (!pm_freezing)
 		atomic_inc(&system_freezing_cnt);
@@ -162,6 +170,10 @@ int freeze_kernel_threads(void)
 {
 	int error;
 
+	error = suspend_sys_sync_wait();
+	if (error)
+		return error;
+
 	printk("Freezing remaining freezable tasks ... ");
 	pm_nosig_freezing = true;
 	error = try_to_freeze_tasks(false);
@@ -179,6 +191,7 @@ int freeze_kernel_threads(void)
 void thaw_processes(void)
 {
 	struct task_struct *g, *p;
+	struct task_struct *curr = current;
 
 	if (pm_freezing)
 		atomic_dec(&system_freezing_cnt);
@@ -193,9 +206,14 @@ void thaw_processes(void)
 
 	read_lock(&tasklist_lock);
 	do_each_thread(g, p) {
+		/* No other threads should have PF_SUSPEND_TASK set */
+		WARN_ON((p != curr) && (p->flags & PF_SUSPEND_TASK));
 		__thaw_task(p);
 	} while_each_thread(g, p);
 	read_unlock(&tasklist_lock);
+
+	WARN_ON(!(curr->flags & PF_SUSPEND_TASK));
+	curr->flags &= ~PF_SUSPEND_TASK;
 
 	usermodehelper_enable();
 

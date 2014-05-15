@@ -68,6 +68,7 @@
 #include <net/netns/generic.h>
 #include <net/rtnetlink.h>
 #include <net/sock.h>
+#include <net/cls_cgroup.h>
 
 #include <asm/uaccess.h>
 
@@ -185,6 +186,7 @@ static void __tun_detach(struct tun_struct *tun)
 	netif_tx_lock_bh(tun->dev);
 	netif_carrier_off(tun->dev);
 	tun->tfile = NULL;
+	tun->socket.file = NULL;
 	netif_tx_unlock_bh(tun->dev);
 
 	/* Drop read queue */
@@ -576,15 +578,13 @@ static unsigned int tun_chr_poll(struct file *file, poll_table * wait)
 
 /* prepad is the amount to reserve at front.  len is length after that.
  * linear is a hint as to how much to copy (usually headers). */
-static struct sk_buff *tun_alloc_skb(struct tun_struct *tun,
-				     size_t prepad, size_t len,
-				     size_t linear, int noblock)
+static inline struct sk_buff *tun_alloc_skb(struct tun_struct *tun,
+					    size_t prepad, size_t len,
+					    size_t linear, int noblock)
 {
 	struct sock *sk = tun->socket.sk;
 	struct sk_buff *skb;
 	int err;
-
-	sock_update_classid(sk);
 
 	/* Under a page?  Don't bother with paged skb. */
 	if (prepad + len < PAGE_SIZE || !linear)
@@ -604,19 +604,20 @@ static struct sk_buff *tun_alloc_skb(struct tun_struct *tun,
 }
 
 /* Get packet from user space buffer */
-static ssize_t tun_get_user(struct tun_struct *tun,
-			    const struct iovec *iv, size_t count,
-			    int noblock)
+static __inline__ ssize_t tun_get_user(struct tun_struct *tun,
+				       const struct iovec *iv, size_t count,
+				       int noblock)
 {
 	struct tun_pi pi = { 0, cpu_to_be16(ETH_P_IP) };
 	struct sk_buff *skb;
-	size_t len = count, align = NET_SKB_PAD;
+	size_t len = count, align = 0;
 	struct virtio_net_hdr gso = { 0 };
 	int offset = 0;
 
 	if (!(tun->flags & TUN_NO_PI)) {
-		if ((len -= sizeof(pi)) > count)
+		if (len < sizeof(pi))
 			return -EINVAL;
+		len -= sizeof(pi);
 
 		if (memcpy_fromiovecend((void *)&pi, iv, 0, sizeof(pi)))
 			return -EFAULT;
@@ -624,8 +625,9 @@ static ssize_t tun_get_user(struct tun_struct *tun,
 	}
 
 	if (tun->flags & TUN_VNET_HDR) {
-		if ((len -= tun->vnet_hdr_sz) > count)
+		if (len < tun->vnet_hdr_sz)
 			return -EINVAL;
+		len -= tun->vnet_hdr_sz;
 
 		if (memcpy_fromiovecend((void *)&gso, iv, offset, sizeof(gso)))
 			return -EFAULT;
@@ -640,7 +642,7 @@ static ssize_t tun_get_user(struct tun_struct *tun,
 	}
 
 	if ((tun->flags & TUN_TYPE_MASK) == TUN_TAP_DEV) {
-		align += NET_IP_ALIGN;
+		align = NET_IP_ALIGN;
 		if (unlikely(len < ETH_HLEN ||
 			     (gso.hdr_len && gso.hdr_len < ETH_HLEN)))
 			return -EINVAL;
@@ -692,7 +694,7 @@ static ssize_t tun_get_user(struct tun_struct *tun,
 	case TUN_TAP_DEV:
 		skb->protocol = eth_type_trans(skb, tun->dev);
 		break;
-	}
+	};
 
 	if (gso.gso_type != VIRTIO_NET_HDR_GSO_NONE) {
 		pr_debug("GSO!\n");
@@ -755,9 +757,9 @@ static ssize_t tun_chr_aio_write(struct kiocb *iocb, const struct iovec *iv,
 }
 
 /* Put packet to the user space buffer */
-static ssize_t tun_put_user(struct tun_struct *tun,
-			    struct sk_buff *skb,
-			    const struct iovec *iv, int len)
+static __inline__ ssize_t tun_put_user(struct tun_struct *tun,
+				       struct sk_buff *skb,
+				       const struct iovec *iv, int len)
 {
 	struct tun_pi pi = { 0, skb->protocol };
 	ssize_t total = 0;
@@ -845,8 +847,7 @@ static ssize_t tun_do_read(struct tun_struct *tun,
 
 	tun_debug(KERN_INFO, tun, "tun_chr_read\n");
 
-	if (unlikely(!noblock))
-		add_wait_queue(&tun->wq.wait, &wait);
+	add_wait_queue(&tun->wq.wait, &wait);
 	while (len) {
 		current->state = TASK_INTERRUPTIBLE;
 
@@ -877,8 +878,7 @@ static ssize_t tun_do_read(struct tun_struct *tun,
 	}
 
 	current->state = TASK_RUNNING;
-	if (unlikely(!noblock))
-		remove_wait_queue(&tun->wq.wait, &wait);
+	remove_wait_queue(&tun->wq.wait, &wait);
 
 	return ret;
 }
@@ -1084,7 +1084,7 @@ static int tun_set_iff(struct net *net, struct file *file, struct ifreq *ifr)
 		char *name;
 		unsigned long flags = 0;
 
-		if (!capable(CAP_NET_ADMIN))
+		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 		err = security_tun_dev_create();
 		if (err < 0)
@@ -1610,15 +1610,16 @@ static void tun_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info
 {
 	struct tun_struct *tun = netdev_priv(dev);
 
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
+	strcpy(info->driver, DRV_NAME);
+	strcpy(info->version, DRV_VERSION);
+	strcpy(info->fw_version, "N/A");
 
 	switch (tun->flags & TUN_TYPE_MASK) {
 	case TUN_TUN_DEV:
-		strlcpy(info->bus_info, "tun", sizeof(info->bus_info));
+		strcpy(info->bus_info, "tun");
 		break;
 	case TUN_TAP_DEV:
-		strlcpy(info->bus_info, "tap", sizeof(info->bus_info));
+		strcpy(info->bus_info, "tap");
 		break;
 	}
 }

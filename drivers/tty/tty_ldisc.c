@@ -1,11 +1,19 @@
 #include <linux/types.h>
+#include <linux/major.h>
 #include <linux/errno.h>
-#include <linux/kmod.h>
+#include <linux/signal.h>
+#include <linux/fcntl.h>
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
+#include <linux/tty_flip.h>
+#include <linux/devpts_fs.h>
 #include <linux/file.h>
+#include <linux/console.h>
+#include <linux/timer.h>
+#include <linux/ctype.h>
+#include <linux/kd.h>
 #include <linux/mm.h>
 #include <linux/string.h>
 #include <linux/slab.h>
@@ -16,8 +24,17 @@
 #include <linux/device.h>
 #include <linux/wait.h>
 #include <linux/bitops.h>
+#include <linux/delay.h>
 #include <linux/seq_file.h>
+
 #include <linux/uaccess.h>
+
+#include <linux/kbd_kern.h>
+#include <linux/vt_kern.h>
+#include <linux/selection.h>
+
+#include <linux/kmod.h>
+#include <linux/nsproxy.h>
 #include <linux/ratelimit.h>
 
 /*
@@ -412,7 +429,7 @@ EXPORT_SYMBOL_GPL(tty_ldisc_flush);
 static void tty_set_termios_ldisc(struct tty_struct *tty, int num)
 {
 	mutex_lock(&tty->termios_mutex);
-	tty->termios->c_line = num;
+	tty->termios.c_line = num;
 	mutex_unlock(&tty->termios_mutex);
 }
 
@@ -522,9 +539,9 @@ static int tty_ldisc_halt(struct tty_struct *tty)
  */
 static void tty_ldisc_flush_works(struct tty_struct *tty)
 {
-	flush_work_sync(&tty->hangup_work);
-	flush_work_sync(&tty->SAK_work);
-	flush_work_sync(&tty->buf.work);
+	flush_work(&tty->hangup_work);
+	flush_work(&tty->SAK_work);
+	flush_work(&tty->buf.work);
 }
 
 /**
@@ -540,6 +557,8 @@ static int tty_ldisc_wait_idle(struct tty_struct *tty, long timeout)
 	long ret;
 	ret = wait_event_timeout(tty_ldisc_idle,
 			atomic_read(&tty->ldisc->users) == 1, timeout);
+	if (ret < 0)
+		return ret;
 	return ret > 0 ? 0 : -EBUSY;
 }
 
@@ -721,9 +740,9 @@ enable:
 static void tty_reset_termios(struct tty_struct *tty)
 {
 	mutex_lock(&tty->termios_mutex);
-	*tty->termios = tty->driver->init_termios;
-	tty->termios->c_ispeed = tty_termios_input_baud_rate(tty->termios);
-	tty->termios->c_ospeed = tty_termios_baud_rate(tty->termios);
+	tty->termios = tty->driver->init_termios;
+	tty->termios.c_ispeed = tty_termios_input_baud_rate(&tty->termios);
+	tty->termios.c_ospeed = tty_termios_baud_rate(&tty->termios);
 	mutex_unlock(&tty->termios_mutex);
 }
 
@@ -845,7 +864,7 @@ retry:
 
 		if (reset == 0) {
 
-			if (!tty_ldisc_reinit(tty, tty->termios->c_line))
+			if (!tty_ldisc_reinit(tty, tty->termios.c_line))
 				err = tty_ldisc_open(tty, tty->ldisc);
 			else
 				err = 1;

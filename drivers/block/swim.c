@@ -26,6 +26,7 @@
 #include <linux/delay.h>
 #include <linux/platform_device.h>
 
+#include <asm/macintosh.h>
 #include <asm/mac_via.h>
 
 #define CARDNAME "swim"
@@ -673,7 +674,7 @@ static int floppy_unlocked_open(struct block_device *bdev, fmode_t mode)
 	return ret;
 }
 
-static int floppy_release(struct gendisk *disk, fmode_t mode)
+static void floppy_release(struct gendisk *disk, fmode_t mode)
 {
 	struct floppy_state *fs = disk->private_data;
 	struct swim __iomem *base = fs->swd->base;
@@ -687,8 +688,6 @@ static int floppy_release(struct gendisk *disk, fmode_t mode)
 	if (fs->ref_count == 0)
 		swim_motor(base, OFF);
 	mutex_unlock(&swim_mutex);
-
-	return 0;
 }
 
 static int floppy_ioctl(struct block_device *bdev, fmode_t mode,

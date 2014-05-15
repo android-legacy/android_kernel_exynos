@@ -105,7 +105,7 @@ out:
  * This function is to be called with the minors_lock mutex held */
 static ssize_t hidraw_send_report(struct file *file, const char __user *buffer, size_t count, unsigned char report_type)
 {
-	unsigned int minor = iminor(file->f_path.dentry->d_inode);
+	unsigned int minor = iminor(file_inode(file));
 	struct hid_device *dev;
 	__u8 *buf;
 	int ret = 0;
@@ -173,7 +173,7 @@ static ssize_t hidraw_write(struct file *file, const char __user *buffer, size_t
  *  mutex held. */
 static ssize_t hidraw_get_report(struct file *file, char __user *buffer, size_t count, unsigned char report_type)
 {
-	unsigned int minor = iminor(file->f_path.dentry->d_inode);
+	unsigned int minor = iminor(file_inode(file));
 	struct hid_device *dev;
 	__u8 *buf;
 	int ret = 0, len;
@@ -259,6 +259,7 @@ static int hidraw_open(struct inode *inode, struct file *file)
 
 	mutex_lock(&minors_lock);
 	if (!hidraw_table[minor]) {
+		kfree(list);
 		err = -ENODEV;
 		goto out_unlock;
 	}
@@ -271,10 +272,8 @@ static int hidraw_open(struct inode *inode, struct file *file)
 	dev = hidraw_table[minor];
 	if (!dev->open++) {
 		err = hid_hw_power(dev->hid, PM_HINT_FULLON);
-		if (err < 0) {
-			dev->open--;
+		if (err < 0)
 			goto out_unlock;
-		}
 
 		err = hid_hw_open(dev->hid);
 		if (err < 0) {
@@ -286,8 +285,6 @@ static int hidraw_open(struct inode *inode, struct file *file)
 out_unlock:
 	mutex_unlock(&minors_lock);
 out:
-	if (err < 0)
-		kfree(list);
 	return err;
 
 }
@@ -326,7 +323,7 @@ unlock:
 static long hidraw_ioctl(struct file *file, unsigned int cmd,
 							unsigned long arg)
 {
-	struct inode *inode = file->f_path.dentry->d_inode;
+	struct inode *inode = file_inode(file);
 	unsigned int minor = iminor(inode);
 	long ret = 0;
 	struct hidraw *dev;
@@ -513,12 +510,13 @@ void hidraw_disconnect(struct hid_device *hid)
 {
 	struct hidraw *hidraw = hid->hidraw;
 
-	mutex_lock(&minors_lock);
 	hidraw->exist = 0;
 
 	device_destroy(hidraw_class, MKDEV(hidraw_major, hidraw->minor));
 
+	mutex_lock(&minors_lock);
 	hidraw_table[hidraw->minor] = NULL;
+	mutex_unlock(&minors_lock);
 
 	if (hidraw->open) {
 		hid_hw_close(hid);
@@ -526,7 +524,6 @@ void hidraw_disconnect(struct hid_device *hid)
 	} else {
 		kfree(hidraw);
 	}
-	mutex_unlock(&minors_lock);
 }
 EXPORT_SYMBOL_GPL(hidraw_disconnect);
 

@@ -170,6 +170,7 @@ void inet_sock_destruct(struct sock *sk)
 
 	kfree(rcu_dereference_protected(inet->inet_opt, 1));
 	dst_release(rcu_dereference_check(sk->sk_dst_cache, 1));
+	dst_release(sk->sk_rx_dst);
 	sk_refcnt_debug_dec(sk);
 }
 EXPORT_SYMBOL(inet_sock_destruct);
@@ -224,6 +225,26 @@ int inet_listen(struct socket *sock, int backlog)
 	 * we can only allow the backlog to be adjusted.
 	 */
 	if (old_state != TCP_LISTEN) {
+		/* Check special setups for testing purpose to enable TFO w/o
+		 * requiring TCP_FASTOPEN sockopt.
+		 * Note that only TCP sockets (SOCK_STREAM) will reach here.
+		 * Also fastopenq may already been allocated because this
+		 * socket was in TCP_LISTEN state previously but was
+		 * shutdown() (rather than close()).
+		 */
+		if ((sysctl_tcp_fastopen & TFO_SERVER_ENABLE) != 0 &&
+		    inet_csk(sk)->icsk_accept_queue.fastopenq == NULL) {
+			if ((sysctl_tcp_fastopen & TFO_SERVER_WO_SOCKOPT1) != 0)
+				err = fastopen_init_queue(sk, backlog);
+			else if ((sysctl_tcp_fastopen &
+				  TFO_SERVER_WO_SOCKOPT2) != 0)
+				err = fastopen_init_queue(sk,
+				    ((uint)sysctl_tcp_fastopen) >> 16);
+			else
+				err = 0;
+			if (err)
+				goto out;
+		}
 		err = inet_csk_listen_start(sk, backlog);
 		if (err)
 			goto out;
@@ -260,20 +281,18 @@ void build_ehash_secret(void)
 }
 EXPORT_SYMBOL(build_ehash_secret);
 
-static inline int inet_netns_ok(struct net *net, int protocol)
+static inline int inet_netns_ok(struct net *net, __u8 protocol)
 {
-	int hash;
 	const struct net_protocol *ipprot;
 
 	if (net_eq(net, &init_net))
 		return 1;
 
-	hash = protocol & (MAX_INET_PROTOS - 1);
-	ipprot = rcu_dereference(inet_protos[hash]);
-
-	if (ipprot == NULL)
+	ipprot = rcu_dereference(inet_protos[protocol]);
+	if (ipprot == NULL) {
 		/* raw IP is OK */
 		return 1;
+	}
 	return ipprot->netns_ok;
 }
 
@@ -349,7 +368,8 @@ lookup_protocol:
 	}
 
 	err = -EPERM;
-	if (sock->type == SOCK_RAW && !kern && !capable(CAP_NET_RAW))
+	if (sock->type == SOCK_RAW && !kern &&
+	    !ns_capable(net->user_ns, CAP_NET_RAW))
 		goto out_rcu_unlock;
 
 	err = -EAFNOSUPPORT;
@@ -372,7 +392,7 @@ lookup_protocol:
 	err = 0;
 	sk->sk_no_check = answer_no_check;
 	if (INET_PROTOSW_REUSE & answer_flags)
-		sk->sk_reuse = 1;
+		sk->sk_reuse = SK_CAN_REUSE;
 
 	inet = inet_sk(sk);
 	inet->is_icsk = (INET_PROTOSW_ICSK & answer_flags) != 0;
@@ -476,6 +496,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	struct sockaddr_in *addr = (struct sockaddr_in *)uaddr;
 	struct sock *sk = sock->sk;
 	struct inet_sock *inet = inet_sk(sk);
+	struct net *net = sock_net(sk);
 	unsigned short snum;
 	int chk_addr_ret;
 	int err;
@@ -499,7 +520,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 			goto out;
 	}
 
-	chk_addr_ret = inet_addr_type(sock_net(sk), addr->sin_addr.s_addr);
+	chk_addr_ret = inet_addr_type(net, addr->sin_addr.s_addr);
 
 	/* Not specified by any standard per-se, however it breaks too
 	 * many applications when removed.  It is unfortunate since
@@ -519,7 +540,8 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 
 	snum = ntohs(addr->sin_port);
 	err = -EACCES;
-	if (snum && snum < PROT_SOCK && !capable(CAP_NET_BIND_SERVICE))
+	if (snum && snum < PROT_SOCK &&
+	    !ns_capable(net->user_ns, CAP_NET_BIND_SERVICE))
 		goto out;
 
 	/*      We keep a pair of addresses. rcv_saddr is the one
@@ -563,7 +585,7 @@ out:
 }
 EXPORT_SYMBOL(inet_bind);
 
-int inet_dgram_connect(struct socket *sock, struct sockaddr * uaddr,
+int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
 		       int addr_len, int flags)
 {
 	struct sock *sk = sock->sk;
@@ -575,15 +597,16 @@ int inet_dgram_connect(struct socket *sock, struct sockaddr * uaddr,
 
 	if (!inet_sk(sk)->inet_num && inet_autobind(sk))
 		return -EAGAIN;
-	return sk->sk_prot->connect(sk, (struct sockaddr *)uaddr, addr_len);
+	return sk->sk_prot->connect(sk, uaddr, addr_len);
 }
 EXPORT_SYMBOL(inet_dgram_connect);
 
-static long inet_wait_for_connect(struct sock *sk, long timeo)
+static long inet_wait_for_connect(struct sock *sk, long timeo, int writebias)
 {
 	DEFINE_WAIT(wait);
 
 	prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
+	sk->sk_write_pending += writebias;
 
 	/* Basic assumption: if someone sets sk->sk_err, he _must_
 	 * change state of the socket from TCP_SYN_*.
@@ -599,6 +622,7 @@ static long inet_wait_for_connect(struct sock *sk, long timeo)
 		prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
 	}
 	finish_wait(sk_sleep(sk), &wait);
+	sk->sk_write_pending -= writebias;
 	return timeo;
 }
 
@@ -606,8 +630,8 @@ static long inet_wait_for_connect(struct sock *sk, long timeo)
  *	Connect to a remote host. There is regrettably still a little
  *	TCP 'magic' in here.
  */
-int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
-			int addr_len, int flags)
+int __inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
+			  int addr_len, int flags)
 {
 	struct sock *sk = sock->sk;
 	int err;
@@ -615,8 +639,6 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 
 	if (addr_len < sizeof(uaddr->sa_family))
 		return -EINVAL;
-
-	lock_sock(sk);
 
 	if (uaddr->sa_family == AF_UNSPEC) {
 		err = sk->sk_prot->disconnect(sk, flags);
@@ -657,8 +679,12 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 	timeo = sock_sndtimeo(sk, flags & O_NONBLOCK);
 
 	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {
+		int writebias = (sk->sk_protocol == IPPROTO_TCP) &&
+				tcp_sk(sk)->fastopen_req &&
+				tcp_sk(sk)->fastopen_req->data ? 1 : 0;
+
 		/* Error code is set above */
-		if (!timeo || !inet_wait_for_connect(sk, timeo))
+		if (!timeo || !inet_wait_for_connect(sk, timeo, writebias))
 			goto out;
 
 		err = sock_intr_errno(timeo);
@@ -680,7 +706,6 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 	sock->state = SS_CONNECTED;
 	err = 0;
 out:
-	release_sock(sk);
 	return err;
 
 sock_error:
@@ -689,6 +714,18 @@ sock_error:
 	if (sk->sk_prot->disconnect(sk, flags))
 		sock->state = SS_DISCONNECTING;
 	goto out;
+}
+EXPORT_SYMBOL(__inet_stream_connect);
+
+int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
+			int addr_len, int flags)
+{
+	int err;
+
+	lock_sock(sock->sk);
+	err = __inet_stream_connect(sock, uaddr, addr_len, flags);
+	release_sock(sock->sk);
+	return err;
 }
 EXPORT_SYMBOL(inet_stream_connect);
 
@@ -709,7 +746,8 @@ int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 
 	sock_rps_record_flow(sk2);
 	WARN_ON(!((1 << sk2->sk_state) &
-		  (TCPF_ESTABLISHED | TCPF_CLOSE_WAIT | TCPF_CLOSE)));
+		  (TCPF_ESTABLISHED | TCPF_SYN_RECV |
+		  TCPF_CLOSE_WAIT | TCPF_CLOSE)));
 
 	sock_graft(sk2, newsock);
 
@@ -1239,8 +1277,8 @@ EXPORT_SYMBOL(inet_sk_rebuild_header);
 
 static int inet_gso_send_check(struct sk_buff *skb)
 {
-	const struct iphdr *iph;
 	const struct net_protocol *ops;
+	const struct iphdr *iph;
 	int proto;
 	int ihl;
 	int err = -EINVAL;
@@ -1259,7 +1297,7 @@ static int inet_gso_send_check(struct sk_buff *skb)
 	__skb_pull(skb, ihl);
 	skb_reset_transport_header(skb);
 	iph = ip_hdr(skb);
-	proto = iph->protocol & (MAX_INET_PROTOS - 1);
+	proto = iph->protocol;
 	err = -EPROTONOSUPPORT;
 
 	rcu_read_lock();
@@ -1273,11 +1311,11 @@ out:
 }
 
 static struct sk_buff *inet_gso_segment(struct sk_buff *skb,
-	netdev_features_t features)
+					netdev_features_t features)
 {
 	struct sk_buff *segs = ERR_PTR(-EINVAL);
-	struct iphdr *iph;
 	const struct net_protocol *ops;
+	struct iphdr *iph;
 	int proto;
 	int ihl;
 	int id;
@@ -1309,7 +1347,7 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb,
 	skb_reset_transport_header(skb);
 	iph = ip_hdr(skb);
 	id = ntohs(iph->id);
-	proto = iph->protocol & (MAX_INET_PROTOS - 1);
+	proto = iph->protocol;
 	segs = ERR_PTR(-EPROTONOSUPPORT);
 
 	rcu_read_lock();
@@ -1363,7 +1401,7 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 			goto out;
 	}
 
-	proto = iph->protocol & (MAX_INET_PROTOS - 1);
+	proto = iph->protocol;
 
 	rcu_read_lock();
 	ops = rcu_dereference(inet_protos[proto]);
@@ -1373,7 +1411,7 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 	if (*(u8 *)iph != 0x45)
 		goto out_unlock;
 
-	if (unlikely(ip_fast_csum((u8 *)iph, iph->ihl)))
+	if (unlikely(ip_fast_csum((u8 *)iph, 5)))
 		goto out_unlock;
 
 	id = ntohl(*(__be32 *)&iph->id);
@@ -1389,7 +1427,6 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 		iph2 = ip_hdr(p);
 
 		if ((iph->protocol ^ iph2->protocol) |
-		    (iph->tos ^ iph2->tos) |
 		    ((__force u32)iph->saddr ^ (__force u32)iph2->saddr) |
 		    ((__force u32)iph->daddr ^ (__force u32)iph2->daddr)) {
 			NAPI_GRO_CB(p)->same_flow = 0;
@@ -1399,6 +1436,7 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 		/* All fields must match except length and checksum. */
 		NAPI_GRO_CB(p)->flush |=
 			(iph->ttl ^ iph2->ttl) |
+			(iph->tos ^ iph2->tos) |
 			((u16)(ntohs(iph2->id) + NAPI_GRO_CB(p)->count) ^ id);
 
 		NAPI_GRO_CB(p)->flush |= flush;
@@ -1421,11 +1459,11 @@ out:
 
 static int inet_gro_complete(struct sk_buff *skb)
 {
-	const struct net_protocol *ops;
-	struct iphdr *iph = ip_hdr(skb);
-	int proto = iph->protocol & (MAX_INET_PROTOS - 1);
-	int err = -ENOSYS;
 	__be16 newlen = htons(skb->len - skb_network_offset(skb));
+	struct iphdr *iph = ip_hdr(skb);
+	const struct net_protocol *ops;
+	int proto = iph->protocol;
+	int err = -ENOSYS;
 
 	csum_replace2(&iph->check, iph->tot_len, newlen);
 	iph->tot_len = newlen;
@@ -1543,14 +1581,15 @@ static const struct net_protocol igmp_protocol = {
 #endif
 
 static const struct net_protocol tcp_protocol = {
-	.handler =	tcp_v4_rcv,
-	.err_handler =	tcp_v4_err,
-	.gso_send_check = tcp_v4_gso_send_check,
-	.gso_segment =	tcp_tso_segment,
-	.gro_receive =	tcp4_gro_receive,
-	.gro_complete =	tcp4_gro_complete,
-	.no_policy =	1,
-	.netns_ok =	1,
+	.early_demux	=	tcp_v4_early_demux,
+	.handler	=	tcp_v4_rcv,
+	.err_handler	=	tcp_v4_err,
+	.gso_send_check	=	tcp_v4_gso_send_check,
+	.gso_segment	=	tcp_tso_segment,
+	.gro_receive	=	tcp4_gro_receive,
+	.gro_complete	=	tcp4_gro_complete,
+	.no_policy	=	1,
+	.netns_ok	=	1,
 };
 
 static const struct net_protocol udp_protocol = {
@@ -1564,7 +1603,7 @@ static const struct net_protocol udp_protocol = {
 
 static const struct net_protocol icmp_protocol = {
 	.handler =	icmp_rcv,
-	.err_handler =	ping_v4_err,
+	.err_handler =	ping_err,
 	.no_policy =	1,
 	.netns_ok =	1,
 };

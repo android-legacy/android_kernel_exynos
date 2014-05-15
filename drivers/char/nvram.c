@@ -94,7 +94,7 @@
 /* Note that *all* calls to CMOS_READ and CMOS_WRITE must be done with
  * rtc_lock held. Due to the index-port/data-port design of the RTC, we
  * don't want two different things trying to get to it at once. (e.g. the
- * periodic 11 min sync from kernel/time/ntp.c vs. this driver.)
+ * periodic 11 min sync from time.c vs. this driver.)
  */
 
 #include <linux/types.h>
@@ -223,8 +223,6 @@ static loff_t nvram_llseek(struct file *file, loff_t offset, int origin)
 	case 2:
 		offset += NVRAM_BYTES;
 		break;
-	default:
-		return -EINVAL;
 	}
 
 	return (offset >= 0) ? (file->f_pos = offset) : -EINVAL;

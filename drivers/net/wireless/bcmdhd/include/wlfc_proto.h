@@ -1,12 +1,12 @@
 /*
-* Copyright (C) 1999-2013, Broadcom Corporation
-* 
+* Copyright (C) 1999-2012, Broadcom Corporation
+*
 *      Unless you and Broadcom execute a separate written software license
 * agreement governing use of this software, this software is licensed to you
 * under the terms of the GNU General Public License version 2 (the "GPL"),
 * available at http://www.broadcom.com/licenses/GPLv2.php, with the
 * following added to such license:
-* 
+*
 *      As a special exception, the copyright holders of this software give you
 * permission to link this software with independent modules, and to copy and
 * distribute the resulting executable under terms of your choice, provided that
@@ -14,11 +14,11 @@
 * the license of that module.  An independent module is a module which is not
 * derived from this software.  The special exception does not apply to any
 * modifications of the software.
-* 
+*
 *      Notwithstanding the above, under no circumstances may you combine this
 * software in any way with any other Broadcom software provided under a license
 * other than the GPL, without Broadcom's express prior written consent.
-* $Id: wlfc_proto.h 381382 2013-01-27 07:13:00Z $
+* $Id: wlfc_proto.h 358262 2012-09-21 21:39:29Z $
 *
 */
 #ifndef __wlfc_proto_definitions_h__
@@ -34,8 +34,7 @@
 	 ---------------------------------------------------------------------------
 	|  3   |   2  | (count, handle, prec_bmp)| Set the credit depth for a MAC dstn
 	 ---------------------------------------------------------------------------
-	|  4   |   4+ | see pkttag comments      | TXSTATUS
-	|      |      | TX status & timestamps   | Present only when pkt timestamp is enabled
+	|  4   |   4  | see pkttag comments      | TXSTATUS
 	 ---------------------------------------------------------------------------
 	|  5   |   4  | see pkttag comments      | PKKTTAG [host->firmware]
 	 ---------------------------------------------------------------------------
@@ -63,10 +62,6 @@
 	|  13  |   3  | (count, handle, prec_bmp)| One time request for packet to a specific
 	|      |      |                          | MAC destination.
 	 ---------------------------------------------------------------------------
-	|  15  |  12  | (pkttag, timestamps)     | Send TX timestamp at reception from host
-	 ---------------------------------------------------------------------------
-	|  16  |  12  | (pkttag, timestamps)     | Send WLAN RX timestamp along with RX frame
-	 ---------------------------------------------------------------------------
 	| 255  |  N/A |  N/A                     | FILLER - This is a special type
 	|      |      |                          | that has no length or value.
 	|      |      |                          | Typically used for padding.
@@ -91,9 +86,6 @@
 #define WLFC_CTL_TYPE_PENDING_TRAFFIC_BMP	12
 #define WLFC_CTL_TYPE_MAC_REQUEST_PACKET	13
 #define WLFC_CTL_TYPE_HOST_REORDER_RXPKTS	14
-
-#define WLFC_CTL_TYPE_TX_ENTRY_STAMP		15
-#define WLFC_CTL_TYPE_RX_STAMP			16
 
 #define WLFC_CTL_TYPE_TRANS_ID			18
 #define WLFC_CTL_TYPE_COMP_TXSTATUS		19
@@ -198,7 +190,7 @@
 	{printf("WLFC: %s():%d:caller:%p\n", \
 	__FUNCTION__, __LINE__, __builtin_return_address(0));}} while (0)
 #define WLFC_PRINTMAC(banner, ea) do {printf("%s MAC: [%02x:%02x:%02x:%02x:%02x:%02x]\n", \
-	banner, ea[0], 	ea[1], 	ea[2], 	ea[3], 	ea[4], 	ea[5]); } while (0)
+	banner, ea[0],	ea[1],	ea[2],	ea[3],	ea[4],	ea[5]); } while (0)
 #define WLFC_WHEREIS(s) printf("WLFC: at %s():%d, %s\n", __FUNCTION__, __LINE__, (s))
 #else
 #define WLFC_DBGMESG(x)

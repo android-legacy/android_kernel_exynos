@@ -67,13 +67,13 @@ static irqreturn_t jz_battery_irq_handler(int irq, void *devid)
 
 static long jz_battery_read_voltage(struct jz_battery *battery)
 {
-	long t;
+	unsigned long t;
 	unsigned long val;
 	long voltage;
 
 	mutex_lock(&battery->lock);
 
-	INIT_COMPLETION(battery->read_completion);
+	reinit_completion(&battery->read_completion);
 
 	enable_irq(battery->irq);
 	battery->cell->enable(battery->pdev);
@@ -173,16 +173,14 @@ static void jz_battery_external_power_changed(struct power_supply *psy)
 {
 	struct jz_battery *jz_battery = psy_to_jz_battery(psy);
 
-	cancel_delayed_work(&jz_battery->work);
-	schedule_delayed_work(&jz_battery->work, 0);
+	mod_delayed_work(system_wq, &jz_battery->work, 0);
 }
 
 static irqreturn_t jz_battery_charge_irq(int irq, void *data)
 {
 	struct jz_battery *jz_battery = data;
 
-	cancel_delayed_work(&jz_battery->work);
-	schedule_delayed_work(&jz_battery->work, 0);
+	mod_delayed_work(system_wq, &jz_battery->work, 0);
 
 	return IRQ_HANDLED;
 }
@@ -441,7 +439,17 @@ static struct platform_driver jz_battery_driver = {
 	},
 };
 
-module_platform_driver(jz_battery_driver);
+static int __init jz_battery_init(void)
+{
+	return platform_driver_register(&jz_battery_driver);
+}
+module_init(jz_battery_init);
+
+static void __exit jz_battery_exit(void)
+{
+	platform_driver_unregister(&jz_battery_driver);
+}
+module_exit(jz_battery_exit);
 
 MODULE_ALIAS("platform:jz4740-battery");
 MODULE_LICENSE("GPL");

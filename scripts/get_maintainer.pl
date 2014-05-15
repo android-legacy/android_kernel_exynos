@@ -83,6 +83,8 @@ push(@signature_tags, "Signed-off-by:");
 push(@signature_tags, "Reviewed-by:");
 push(@signature_tags, "Acked-by:");
 
+my $signature_pattern = "\(" . join("|", @signature_tags) . "\)";
+
 # rfc822 email address - preloaded methods go here.
 my $rfc822_lwsp = "(?:(?:\\r\\n)?[ \\t])";
 my $rfc822_char = '[\\000-\\377]';
@@ -93,7 +95,7 @@ my %VCS_cmds;
 
 my %VCS_cmds_git = (
     "execute_cmd" => \&git_execute_cmd,
-    "available" => '(which("git") ne "") && (-d ".git")',
+    "available" => '(which("git") ne "") && (-e ".git")',
     "find_signers_cmd" =>
 	"git log --no-color --follow --since=\$email_git_since " .
 	    '--format="GitCommit: %H%n' .
@@ -431,7 +433,7 @@ foreach my $file (@ARGV) {
 
 	while (<$patch>) {
 	    my $patch_line = $_;
-	    if (m/^\+\+\+\s+(\S+)/) {
+	    if (m/^\+\+\+\s+(\S+)/ or m/^---\s+(\S+)/) {
 		my $filename = $1;
 		$filename =~ s@^[^/]*/@@;
 		$filename =~ s@\n@@;
@@ -473,7 +475,6 @@ my @subsystem = ();
 my @status = ();
 my %deduplicate_name_hash = ();
 my %deduplicate_address_hash = ();
-my $signature_pattern;
 
 my @maintainers = get_maintainers();
 
@@ -609,6 +610,10 @@ sub get_maintainers {
 				    (($file_pd - $value_pd) < $pattern_depth)) {
 				    $hash{$tvi} = $value_pd;
 				}
+			    }
+			} elsif ($type eq 'N') {
+			    if ($file =~ m/$value/x) {
+				$hash{$tvi} = 0;
 			    }
 			}
 		    }

@@ -1316,8 +1316,7 @@ out_error_memory:
 	mempool_destroy(hvc_iucv_mempool);
 	kmem_cache_destroy(hvc_iucv_buffer_cache);
 out_error:
-	if (hvc_iucv_filter)
-		kfree(hvc_iucv_filter);
+	kfree(hvc_iucv_filter);
 	hvc_iucv_devices = 0; /* ensure that we do not provide any device */
 	return rc;
 }
@@ -1328,7 +1327,7 @@ out_error:
  */
 static	int __init hvc_iucv_config(char *val)
 {
-	 return strict_strtoul(val, 10, &hvc_iucv_devices);
+	 return kstrtoul(val, 10, &hvc_iucv_devices);
 }
 
 

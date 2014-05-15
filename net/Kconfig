@@ -5,6 +5,7 @@
 menuconfig NET
 	bool "Networking support"
 	select NLATTR
+	select GENERIC_NET_UTILS
 	---help---
 	  Unless you really know what you are doing, you should say Y here.
 	  The reason is that some programs need kernel networking support even
@@ -52,6 +53,8 @@ source "net/iucv/Kconfig"
 
 config INET
 	bool "TCP/IP networking"
+	select CRYPTO
+	select CRYPTO_AES
 	---help---
 	  These are the protocols used on the Internet and on most local
 	  Ethernets. It is highly recommended to say Y here (this will enlarge
@@ -221,10 +224,9 @@ source "net/ipx/Kconfig"
 source "drivers/net/appletalk/Kconfig"
 source "net/x25/Kconfig"
 source "net/lapb/Kconfig"
-source "net/econet/Kconfig"
-source "net/wanrouter/Kconfig"
 source "net/phonet/Kconfig"
 source "net/ieee802154/Kconfig"
+source "net/mac802154/Kconfig"
 source "net/sched/Kconfig"
 source "net/dcb/Kconfig"
 source "net/dns_resolver/Kconfig"
@@ -233,18 +235,18 @@ source "net/openvswitch/Kconfig"
 
 config RPS
 	boolean "RPS"
-	depends on SMP && SYSFS && USE_GENERIC_SMP_HELPERS
-	default y
+	depends on SMP && SYSFS
+	default n
 
 config RFS_ACCEL
-	boolean
-	depends on RPS && GENERIC_HARDIRQS
+	boolean "RFS_ACCEL"
+	depends on RPS
 	select CPU_RMAP
 	default y
 
 config XPS
-	boolean
-	depends on SMP && SYSFS && USE_GENERIC_SMP_HELPERS
+	boolean "XPS"
+	depends on SMP && RPS
 	default y
 
 config NETPRIO_CGROUP
@@ -260,8 +262,17 @@ config BQL
 	select DQL
 	default y
 
-config HAVE_BPF_JIT
-	bool
+config NET_LL_RX_POLL
+	bool "Low Latency Receive Poll"
+	depends on X86_TSC
+	default n
+	---help---
+	  Support Low Latency Receive Queue Poll.
+	  (For network card drivers which support this option.)
+	  When waiting for data in read or poll call directly into the the device driver
+	  to flush packets which may be pending on the device queues into the stack.
+
+	  If unsure, say N.
 
 config BPF_JIT
 	bool "enable BPF Just In Time compiler"
@@ -309,7 +320,7 @@ config NET_TCPPROBE
 	module will be called tcp_probe.
 
 config NET_DROP_MONITOR
-	boolean "Network packet drop alerting service"
+	tristate "Network packet drop alerting service"
 	depends on INET && EXPERIMENTAL && TRACEPOINTS
 	---help---
 	This feature provides an alerting service to userspace in the
@@ -327,6 +338,7 @@ source "net/ax25/Kconfig"
 source "net/can/Kconfig"
 source "net/irda/Kconfig"
 source "net/bluetooth/Kconfig"
+source "net/bluetooth_tizen/Kconfig"
 source "net/rxrpc/Kconfig"
 
 config FIB_RULES
@@ -354,3 +366,7 @@ source "net/nfc/Kconfig"
 
 
 endif   # if NET
+
+# Used by archs to tell that they support BPF_JIT
+config HAVE_BPF_JIT
+	bool

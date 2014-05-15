@@ -39,14 +39,8 @@
 #error KERNEL_RAM_VADDR must start at 0xXXXX8000
 #endif
 
-#ifdef CONFIG_ARM_LPAE
-	/* LPAE requires an additional page for the PGD */
-#define PG_DIR_SIZE	0x5000
-#define PMD_ORDER	3
-#else
 #define PG_DIR_SIZE	0x4000
 #define PMD_ORDER	2
-#endif
 
 	.globl	swapper_pg_dir
 	.equ	swapper_pg_dir, KERNEL_RAM_VADDR - PG_DIR_SIZE
@@ -54,14 +48,6 @@
 	.macro	pgtbl, rd, phys
 	add	\rd, \phys, #TEXT_OFFSET - PG_DIR_SIZE
 	.endm
-
-#ifdef CONFIG_XIP_KERNEL
-#define KERNEL_START	XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR)
-#define KERNEL_END	_edata_loc
-#else
-#define KERNEL_START	KERNEL_RAM_VADDR
-#define KERNEL_END	_end
-#endif
 
 /*
  * Kernel startup entry point.
@@ -81,16 +67,8 @@
  * crap here - that's what the boot loader (or in extreme, well justified
  * circumstances, zImage) is for.
  */
-	.arm
-
 	__HEAD
 ENTRY(stext)
-
- THUMB(	adr	r9, BSYM(1f)	)	@ Kernel is always entered in ARM.
- THUMB(	bx	r9		)	@ If this is a Thumb-2 kernel,
- THUMB(	.thumb			)	@ switch to Thumb now.
- THUMB(1:			)
-
 	setmode	PSR_F_BIT | PSR_I_BIT | SVC_MODE, r9 @ ensure svc mode
 						@ and irqs disabled
 	mrc	p15, 0, r9, c0, c0		@ get processor id
@@ -99,21 +77,13 @@ ENTRY(stext)
  THUMB( it	eq )		@ force fixup-able long branch encoding
 	beq	__error_p			@ yes, error 'p'
 
-#ifdef CONFIG_ARM_LPAE
-	mrc	p15, 0, r3, c0, c1, 4		@ read ID_MMFR0
-	and	r3, r3, #0xf			@ extract VMSA support
-	cmp	r3, #5				@ long-descriptor translation table format?
- THUMB( it	lo )				@ force fixup-able long branch encoding
-	blo	__error_p			@ only classic page table format
-#endif
-
 #ifndef CONFIG_XIP_KERNEL
 	adr	r3, 2f
 	ldmia	r3, {r4, r8}
 	sub	r4, r3, r4			@ (PHYS_OFFSET - PAGE_OFFSET)
 	add	r8, r8, r4			@ PHYS_OFFSET
 #else
-	ldr	r8, =PHYS_OFFSET		@ always constant in this case
+	ldr	r8, =PLAT_PHYS_OFFSET		@ always constant in this case
 #endif
 
 	/*
@@ -178,25 +148,6 @@ __create_page_tables:
 	teq	r0, r6
 	bne	1b
 
-#ifdef CONFIG_ARM_LPAE
-	/*
-	 * Build the PGD table (first level) to point to the PMD table. A PGD
-	 * entry is 64-bit wide.
-	 */
-	mov	r0, r4
-	add	r3, r4, #0x1000			@ first PMD table address
-	orr	r3, r3, #3			@ PGD block type
-	mov	r6, #4				@ PTRS_PER_PGD
-	mov	r7, #1 << (55 - 32)		@ L_PGD_SWAPPER
-1:	str	r3, [r0], #4			@ set bottom PGD entry bits
-	str	r7, [r0], #4			@ set top PGD entry bits
-	add	r3, r3, #0x1000			@ next PMD table
-	subs	r6, r6, #1
-	bne	1b
-
-	add	r4, r4, #0x1000			@ point to the PMD tables
-#endif
-
 	ldr	r7, [r10, #PROCINFO_MM_MMUFLAGS] @ mm_mmuflags
 
 	/*
@@ -218,54 +169,54 @@ __create_page_tables:
 	blo	1b
 
 	/*
-	 * Now setup the pagetables for our kernel direct
-	 * mapped region.
+	 * Map our RAM from the start to the end of the kernel .bss section.
 	 */
+	add	r0, r4, #PAGE_OFFSET >> (SECTION_SHIFT - PMD_ORDER)
+	ldr	r6, =(_end - 1)
+	orr	r3, r8, r7
+	add	r6, r4, r6, lsr #(SECTION_SHIFT - PMD_ORDER)
+1:	str	r3, [r0], #1 << PMD_ORDER
+	add	r3, r3, #1 << SECTION_SHIFT
+	cmp	r0, r6
+	bls	1b
+
+#ifdef CONFIG_XIP_KERNEL
+	/*
+	 * Map the kernel image separately as it is not located in RAM.
+	 */
+#define XIP_START XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR)
 	mov	r3, pc
 	mov	r3, r3, lsr #SECTION_SHIFT
 	orr	r3, r7, r3, lsl #SECTION_SHIFT
-	add	r0, r4,  #(KERNEL_START & 0xff000000) >> (SECTION_SHIFT - PMD_ORDER)
-	str	r3, [r0, #((KERNEL_START & 0x00f00000) >> SECTION_SHIFT) << PMD_ORDER]!
-	ldr	r6, =(KERNEL_END - 1)
+	add	r0, r4,  #(XIP_START & 0xff000000) >> (SECTION_SHIFT - PMD_ORDER)
+	str	r3, [r0, #((XIP_START & 0x00f00000) >> SECTION_SHIFT) << PMD_ORDER]!
+	ldr	r6, =(_edata_loc - 1)
 	add	r0, r0, #1 << PMD_ORDER
 	add	r6, r4, r6, lsr #(SECTION_SHIFT - PMD_ORDER)
 1:	cmp	r0, r6
 	add	r3, r3, #1 << SECTION_SHIFT
 	strls	r3, [r0], #1 << PMD_ORDER
 	bls	1b
-
-#ifdef CONFIG_XIP_KERNEL
-	/*
-	 * Map some ram to cover our .data and .bss areas.
-	 */
-	add	r3, r8, #TEXT_OFFSET
-	orr	r3, r3, r7
-	add	r0, r4,  #(KERNEL_RAM_VADDR & 0xff000000) >> (SECTION_SHIFT - PMD_ORDER)
-	str	r3, [r0, #(KERNEL_RAM_VADDR & 0x00f00000) >> (SECTION_SHIFT - PMD_ORDER)]!
-	ldr	r6, =(_end - 1)
-	add	r0, r0, #4
-	add	r6, r4, r6, lsr #(SECTION_SHIFT - PMD_ORDER)
-1:	cmp	r0, r6
-	add	r3, r3, #1 << 20
-	strls	r3, [r0], #4
-	bls	1b
 #endif
 
 	/*
-	 * Then map boot params address in r2 or the first 1MB (2MB with LPAE)
-	 * of ram if boot params address is not specified.
+	 * Then map boot params address in r2 if specified.
 	 */
 	mov	r0, r2, lsr #SECTION_SHIFT
 	movs	r0, r0, lsl #SECTION_SHIFT
-	moveq	r0, r8
-	sub	r3, r0, r8
-	add	r3, r3, #PAGE_OFFSET
-	add	r3, r4, r3, lsr #(SECTION_SHIFT - PMD_ORDER)
-	orr	r6, r7, r0
-	str	r6, [r3]
+	subne	r3, r0, r8
+	addne	r3, r3, #PAGE_OFFSET
+	addne	r3, r4, r3, lsr #(SECTION_SHIFT - PMD_ORDER)
+	orrne	r6, r7, r0
+	strne	r6, [r3]
+
+#if defined(CONFIG_ARM_LPAE) && defined(CONFIG_CPU_ENDIAN_BE8)
+	sub	r4, r4, #4			@ Fixup page table pointer
+						@ for 64-bit descriptors
+#endif
 
 #ifdef CONFIG_DEBUG_LL
-#if !defined(CONFIG_DEBUG_ICEDCC) && !defined(CONFIG_DEBUG_SEMIHOSTING)
+#ifndef CONFIG_DEBUG_ICEDCC
 	/*
 	 * Map in IO space for serial debugging.
 	 * This allows debug messages to be output
@@ -284,23 +235,15 @@ __create_page_tables:
 	mov	r3, r7, lsr #SECTION_SHIFT
 	ldr	r7, [r10, #PROCINFO_IO_MMUFLAGS] @ io_mmuflags
 	orr	r3, r7, r3, lsl #SECTION_SHIFT
-#ifdef CONFIG_ARM_LPAE
-	mov	r7, #1 << (54 - 32)		@ XN
-#else
-	orr	r3, r3, #PMD_SECT_XN
-#endif
 1:	str	r3, [r0], #4
-#ifdef CONFIG_ARM_LPAE
-	str	r7, [r0], #4
-#endif
 	add	r3, r3, #1 << SECTION_SHIFT
 	cmp	r0, r6
 	blo	1b
 
-#else /* CONFIG_DEBUG_ICEDCC || CONFIG_DEBUG_SEMIHOSTING */
-	/* we don't need any serial debugging mappings */
+#else /* CONFIG_DEBUG_ICEDCC */
+	/* we don't need any serial debugging mappings for ICEDCC */
 	ldr	r7, [r10, #PROCINFO_IO_MMUFLAGS] @ io_mmuflags
-#endif
+#endif /* !CONFIG_DEBUG_ICEDCC */
 
 #if defined(CONFIG_ARCH_NETWINDER) || defined(CONFIG_ARCH_CATS)
 	/*
@@ -323,9 +266,6 @@ __create_page_tables:
 	add	r0, r4, #0xd8000000 >> (SECTION_SHIFT - PMD_ORDER)
 	str	r3, [r0]
 #endif
-#endif
-#ifdef CONFIG_ARM_LPAE
-	sub	r4, r4, #0x1000		@ point to the PGD table
 #endif
 	mov	pc, lr
 ENDPROC(__create_page_tables)
@@ -418,17 +358,12 @@ __enable_mmu:
 #ifdef CONFIG_CPU_ICACHE_DISABLE
 	bic	r0, r0, #CR_I
 #endif
-#ifdef CONFIG_ARM_LPAE
-	mov	r5, #0
-	mcrr	p15, 0, r4, r5, c2		@ load TTBR0
-#else
 	mov	r5, #(domain_val(DOMAIN_USER, DOMAIN_MANAGER) | \
 		      domain_val(DOMAIN_KERNEL, DOMAIN_MANAGER) | \
 		      domain_val(DOMAIN_TABLE, DOMAIN_MANAGER) | \
 		      domain_val(DOMAIN_IO, DOMAIN_CLIENT))
 	mcr	p15, 0, r5, c3, c0, 0		@ load domain access register
 	mcr	p15, 0, r4, c2, c0, 0		@ load page table pointer
-#endif
 	b	__turn_mmu_on
 ENDPROC(__enable_mmu)
 
@@ -450,10 +385,8 @@ ENDPROC(__enable_mmu)
 	.pushsection	.idmap.text, "ax"
 ENTRY(__turn_mmu_on)
 	mov	r0, r0
-	instr_sync
 	mcr	p15, 0, r0, c1, c0, 0		@ write control reg
 	mrc	p15, 0, r3, c0, c0, 0		@ read id reg
-	instr_sync
 	mov	r3, r3
 	mov	r3, r13
 	mov	pc, r3
@@ -480,7 +413,26 @@ __fixup_smp:
 	mrc	p15, 0, r0, c0, c0, 5	@ read MPIDR
 	and	r0, r0, #0xc0000000	@ multiprocessing extensions and
 	teq	r0, #0x80000000		@ not part of a uniprocessor system?
-	moveq	pc, lr			@ yes, assume SMP
+	bne    __fixup_smp_on_up	@ no, assume UP
+
+	@ Core indicates it is SMP. Check for Aegis SOC where a single
+	@ Cortex-A9 CPU is present but SMP operations fault.
+	mov	r4, #0x41000000
+	orr	r4, r4, #0x0000c000
+	orr	r4, r4, #0x00000090
+	teq	r3, r4			@ Check for ARM Cortex-A9
+	movne	pc, lr			@ Not ARM Cortex-A9,
+
+	@ If a future SoC *does* use 0x0 as the PERIPH_BASE, then the
+	@ below address check will need to be #ifdef'd or equivalent
+	@ for the Aegis platform.
+	mrc	p15, 4, r0, c15, c0	@ get SCU base address
+	teq	r0, #0x0		@ '0' on actual UP A9 hardware
+	beq	__fixup_smp_on_up	@ So its an A9 UP
+	ldr	r0, [r0, #4]		@ read SCU Config
+	and	r0, r0, #0x3		@ number of CPUs
+	teq	r0, #0x0		@ is 1?
+	movne	pc, lr
 
 __fixup_smp_on_up:
 	adr	r0, 1f
@@ -545,8 +497,13 @@ __fixup_pv_table:
 	add	r5, r5, r3	@ adjust table end address
 	add	r7, r7, r3	@ adjust __pv_phys_offset address
 	str	r8, [r7]	@ save computed PHYS_OFFSET to __pv_phys_offset
+#ifndef CONFIG_ARM_PATCH_PHYS_VIRT_16BIT
 	mov	r6, r3, lsr #24	@ constant for add/sub instructions
 	teq	r3, r6, lsl #24 @ must be 16MiB aligned
+#else
+	mov	r6, r3, lsr #16	@ constant for add/sub instructions
+	teq	r3, r6, lsl #16	@ must be 64kiB aligned
+#endif
 THUMB(	it	ne		@ cross section branch )
 	bne	__error
 	str	r6, [r7, #4]	@ save to __pv_offset
@@ -562,8 +519,20 @@ ENDPROC(__fixup_pv_table)
 	.text
 __fixup_a_pv_table:
 #ifdef CONFIG_THUMB2_KERNEL
-	lsls	r6, #24
-	beq	2f
+#ifdef CONFIG_ARM_PATCH_PHYS_VIRT_16BIT
+	lsls	r0, r6, #24
+	lsr	r6, #8
+	beq	1f
+	clz	r7, r0
+	lsr	r0, #24
+	lsl	r0, r7
+	bic	r0, 0x0080
+	lsrs	r7, #1
+	orrcs   r0, #0x0080
+	orr	r0, r0, r7, lsl #12
+#endif
+1:	lsls	r6, #24
+	beq	4f
 	clz	r7, r6
 	lsr	r6, #24
 	lsl	r6, r7
@@ -572,25 +541,43 @@ __fixup_a_pv_table:
 	orrcs	r6, #0x0080
 	orr	r6, r6, r7, lsl #12
 	orr	r6, #0x4000
-	b	2f
-1:	add     r7, r3
-	ldrh	ip, [r7, #2]
+	b	4f
+2:	@ at this point the C flag is always clear
+	add     r7, r3
+#ifdef CONFIG_ARM_PATCH_PHYS_VIRT_16BIT
+	ldrh	ip, [r7]
+	tst	ip, 0x0400	@ the i bit tells us LS or MS byte
+	beq	3f
+	cmp	r0, #0		@ set C flag, and ...
+	biceq	ip, 0x0400	@ immediate zero value has a special encoding
+	streqh	ip, [r7]	@ that requires the i bit cleared
+#endif
+3:	ldrh	ip, [r7, #2]
 	and	ip, 0x8f00
-	orr	ip, r6	@ mask in offset bits 31-24
+	orrcc	ip, r6	@ mask in offset bits 31-24
+	orrcs	ip, r0	@ mask in offset bits 23-16
 	strh	ip, [r7, #2]
-2:	cmp	r4, r5
+4:	cmp	r4, r5
 	ldrcc	r7, [r4], #4	@ use branch for delay slot
-	bcc	1b
+	bcc	2b
 	bx	lr
 #else
-	b	2f
-1:	ldr	ip, [r7, r3]
+#ifdef CONFIG_ARM_PATCH_PHYS_VIRT_16BIT
+	and	r0, r6, #255	@ offset bits 23-16
+	mov	r6, r6, lsr #8	@ offset bits 31-24
+#else
+	mov	r0, #0		@ just in case...
+#endif
+	b	3f
+2:	ldr	ip, [r7, r3]
 	bic	ip, ip, #0x000000ff
-	orr	ip, ip, r6	@ mask in offset bits 31-24
+	tst	ip, #0x400	@ rotate shift tells us LS or MS byte
+	orrne	ip, ip, r6	@ mask in offset bits 31-24
+	orreq	ip, ip, r0	@ mask in offset bits 23-16
 	str	ip, [r7, r3]
-2:	cmp	r4, r5
+3:	cmp	r4, r5
 	ldrcc	r7, [r4], #4	@ use branch for delay slot
-	bcc	1b
+	bcc	2b
 	mov	pc, lr
 #endif
 ENDPROC(__fixup_a_pv_table)

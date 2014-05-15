@@ -72,6 +72,7 @@
 
 int selinux_policycap_netpeer;
 int selinux_policycap_openperm;
+int selinux_policycap_alwaysnetwork;
 
 static DEFINE_RWLOCK(policy_rwlock);
 
@@ -1018,9 +1019,11 @@ static int context_struct_to_string(struct context *context, char **scontext, u3
 
 	if (context->len) {
 		*scontext_len = context->len;
-		*scontext = kstrdup(context->str, GFP_ATOMIC);
-		if (!(*scontext))
-			return -ENOMEM;
+		if (scontext) {
+			*scontext = kstrdup(context->str, GFP_ATOMIC);
+			if (!(*scontext))
+				return -ENOMEM;
+		}
 		return 0;
 	}
 
@@ -1229,6 +1232,10 @@ static int security_context_to_sid_core(const char *scontext, u32 scontext_len,
 	struct context context;
 	int rc = 0;
 
+	/* An empty security context is never valid. */
+	if (!scontext_len)
+		return -EINVAL;
+
 	if (!ss_initialized) {
 		int i;
 
@@ -1282,16 +1289,18 @@ out:
  * @scontext: security context
  * @scontext_len: length in bytes
  * @sid: security identifier, SID
+ * @gfp: context for the allocation
  *
  * Obtains a SID associated with the security context that
  * has the string representation specified by @scontext.
  * Returns -%EINVAL if the context is invalid, -%ENOMEM if insufficient
  * memory is available, or 0 on success.
  */
-int security_context_to_sid(const char *scontext, u32 scontext_len, u32 *sid)
+int security_context_to_sid(const char *scontext, u32 scontext_len, u32 *sid,
+			    gfp_t gfp)
 {
 	return security_context_to_sid_core(scontext, scontext_len,
-					    sid, SECSID_NULL, GFP_KERNEL, 0);
+					    sid, SECSID_NULL, gfp, 0);
 }
 
 /**
@@ -1389,6 +1398,7 @@ static int security_compute_sid(u32 ssid,
 				u32 *out_sid,
 				bool kern)
 {
+	struct class_datum *cladatum = NULL;
 	struct context *scontext = NULL, *tcontext = NULL, newcontext;
 	struct role_trans *roletr = NULL;
 	struct avtab_key avkey;
@@ -1437,12 +1447,20 @@ static int security_compute_sid(u32 ssid,
 		goto out_unlock;
 	}
 
+	if (tclass && tclass <= policydb.p_classes.nprim)
+		cladatum = policydb.class_val_to_struct[tclass - 1];
+
 	/* Set the user identity. */
 	switch (specified) {
 	case AVTAB_TRANSITION:
 	case AVTAB_CHANGE:
-		/* Use the process user identity. */
-		newcontext.user = scontext->user;
+		if (cladatum && cladatum->default_user == DEFAULT_TARGET) {
+			newcontext.user = tcontext->user;
+		} else {
+			/* notice this gets both DEFAULT_SOURCE and unset */
+			/* Use the process user identity. */
+			newcontext.user = scontext->user;
+		}
 		break;
 	case AVTAB_MEMBER:
 		/* Use the related object owner. */
@@ -1450,16 +1468,31 @@ static int security_compute_sid(u32 ssid,
 		break;
 	}
 
-	/* Set the role and type to default values. */
-	if ((tclass == policydb.process_class) || (sock == true)) {
-		/* Use the current role and type of process. */
+	/* Set the role to default values. */
+	if (cladatum && cladatum->default_role == DEFAULT_SOURCE) {
 		newcontext.role = scontext->role;
-		newcontext.type = scontext->type;
+	} else if (cladatum && cladatum->default_role == DEFAULT_TARGET) {
+		newcontext.role = tcontext->role;
 	} else {
-		/* Use the well-defined object role. */
-		newcontext.role = OBJECT_R_VAL;
-		/* Use the type of the related object. */
+		if ((tclass == policydb.process_class) || (sock == true))
+			newcontext.role = scontext->role;
+		else
+			newcontext.role = OBJECT_R_VAL;
+	}
+
+	/* Set the type to default values. */
+	if (cladatum && cladatum->default_type == DEFAULT_SOURCE) {
+		newcontext.type = scontext->type;
+	} else if (cladatum && cladatum->default_type == DEFAULT_TARGET) {
 		newcontext.type = tcontext->type;
+	} else {
+		if ((tclass == policydb.process_class) || (sock == true)) {
+			/* Use the type of process. */
+			newcontext.type = scontext->type;
+		} else {
+			/* Use the type of the related object. */
+			newcontext.type = tcontext->type;
+		}
 	}
 
 	/* Look for a type transition/member/change rule. */
@@ -1786,6 +1819,8 @@ static void security_load_policycaps(void)
 						  POLICYDB_CAPABILITY_NETPEER);
 	selinux_policycap_openperm = ebitmap_get_bit(&policydb.policycaps,
 						  POLICYDB_CAPABILITY_OPENPERM);
+	selinux_policycap_alwaysnetwork = ebitmap_get_bit(&policydb.policycaps,
+						  POLICYDB_CAPABILITY_ALWAYSNETWORK);
 }
 
 static int security_preserve_bools(struct policydb *p);
@@ -2297,17 +2332,14 @@ out:
 
 /**
  * security_fs_use - Determine how to handle labeling for a filesystem.
- * @fstype: filesystem type
- * @behavior: labeling behavior
- * @sid: SID for filesystem (superblock)
+ * @sb: superblock in question
  */
-int security_fs_use(
-	const char *fstype,
-	unsigned int *behavior,
-	u32 *sid)
+int security_fs_use(struct super_block *sb)
 {
 	int rc = 0;
 	struct ocontext *c;
+	struct superblock_security_struct *sbsec = sb->s_security;
+	const char *fstype = sb->s_type->name;
 
 	read_lock(&policy_rwlock);
 
@@ -2319,21 +2351,21 @@ int security_fs_use(
 	}
 
 	if (c) {
-		*behavior = c->v.behavior;
+		sbsec->behavior = c->v.behavior;
 		if (!c->sid[0]) {
 			rc = sidtab_context_to_sid(&sidtab, &c->context[0],
 						   &c->sid[0]);
 			if (rc)
 				goto out;
 		}
-		*sid = c->sid[0];
+		sbsec->sid = c->sid[0];
 	} else {
-		rc = security_genfs_sid(fstype, "/", SECCLASS_DIR, sid);
+		rc = security_genfs_sid(fstype, "/", SECCLASS_DIR, &sbsec->sid);
 		if (rc) {
-			*behavior = SECURITY_FS_USE_NONE;
+			sbsec->behavior = SECURITY_FS_USE_NONE;
 			rc = 0;
 		} else {
-			*behavior = SECURITY_FS_USE_GENFS;
+			sbsec->behavior = SECURITY_FS_USE_GENFS;
 		}
 	}
 
@@ -2414,7 +2446,7 @@ int security_set_bools(int len, int *values)
 				sym_name(&policydb, SYM_BOOLS, i),
 				!!values[i],
 				policydb.bool_val_to_struct[i]->state,
-				audit_get_loginuid(current),
+				from_kuid(&init_user_ns, audit_get_loginuid(current)),
 				audit_get_sessionid(current));
 		}
 		if (values[i])
@@ -3018,8 +3050,7 @@ out:
 
 static int (*aurule_callback)(void) = audit_update_lsm_rules;
 
-static int aurule_avc_callback(u32 event, u32 ssid, u32 tsid,
-			       u16 class, u32 perms, u32 *retained)
+static int aurule_avc_callback(u32 event)
 {
 	int err = 0;
 
@@ -3032,8 +3063,7 @@ static int __init aurule_init(void)
 {
 	int err;
 
-	err = avc_add_callback(aurule_avc_callback, AVC_CALLBACK_RESET,
-			       SECSID_NULL, SECSID_NULL, SECCLASS_NULL, 0);
+	err = avc_add_callback(aurule_avc_callback, AVC_CALLBACK_RESET);
 	if (err)
 		panic("avc_add_callback() failed, error %d\n", err);
 

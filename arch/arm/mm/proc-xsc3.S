@@ -28,6 +28,7 @@
 #include <linux/init.h>
 #include <asm/assembler.h>
 #include <asm/hwcap.h>
+#include <mach/hardware.h>
 #include <asm/pgtable.h>
 #include <asm/pgtable-hwdef.h>
 #include <asm/page.h>
@@ -337,6 +338,9 @@ ENTRY(xsc3_dma_unmap_area)
 	mov	pc, lr
 ENDPROC(xsc3_dma_unmap_area)
 
+	.globl	xsc3_flush_kern_cache_louis
+	.equ	xsc3_flush_kern_cache_louis, xsc3_flush_kern_cache_all
+
 	@ define struct cpu_cache_fns (see <asm/cacheflush.h> and proc-macros.S)
 	define_cache_functions xsc3
 
@@ -409,23 +413,24 @@ ENTRY(cpu_xsc3_set_pte_ext)
 	.align
 
 .globl	cpu_xsc3_suspend_size
-.equ	cpu_xsc3_suspend_size, 4 * 6
+.equ	cpu_xsc3_suspend_size, 4 * 7
 #ifdef CONFIG_PM_SLEEP
 ENTRY(cpu_xsc3_do_suspend)
-	stmfd	sp!, {r4 - r9, lr}
+	stmfd	sp!, {r4 - r10, lr}
 	mrc	p14, 0, r4, c6, c0, 0	@ clock configuration, for turbo mode
 	mrc	p15, 0, r5, c15, c1, 0	@ CP access reg
 	mrc	p15, 0, r6, c13, c0, 0	@ PID
 	mrc 	p15, 0, r7, c3, c0, 0	@ domain ID
-	mrc	p15, 0, r8, c1, c0, 1	@ auxiliary control reg
-	mrc 	p15, 0, r9, c1, c0, 0	@ control reg
+	mrc 	p15, 0, r8, c2, c0, 0	@ translation table base addr
+	mrc	p15, 0, r9, c1, c0, 1	@ auxiliary control reg
+	mrc 	p15, 0, r10, c1, c0, 0	@ control reg
 	bic	r4, r4, #2		@ clear frequency change bit
-	stmia	r0, {r4 - r9}		@ store cp regs
-	ldmia	sp!, {r4 - r9, pc}
+	stmia	r0, {r4 - r10}		@ store cp regs
+	ldmia	sp!, {r4 - r10, pc}
 ENDPROC(cpu_xsc3_do_suspend)
 
 ENTRY(cpu_xsc3_do_resume)
-	ldmia	r0, {r4 - r9}		@ load cp regs
+	ldmia	r0, {r4 - r10}		@ load cp regs
 	mov	ip, #0
 	mcr	p15, 0, ip, c7, c7, 0	@ invalidate I & D caches, BTB
 	mcr	p15, 0, ip, c7, c10, 4	@ drain write (&fill) buffer
@@ -435,10 +440,15 @@ ENTRY(cpu_xsc3_do_resume)
 	mcr	p15, 0, r5, c15, c1, 0	@ CP access reg
 	mcr	p15, 0, r6, c13, c0, 0	@ PID
 	mcr	p15, 0, r7, c3, c0, 0	@ domain ID
-	orr	r1, r1, #0x18		@ cache the page table in L2
-	mcr	p15, 0, r1, c2, c0, 0	@ translation table base addr
-	mcr	p15, 0, r8, c1, c0, 1	@ auxiliary control reg
-	mov	r0, r9			@ control register
+	mcr	p15, 0, r8, c2, c0, 0	@ translation table base addr
+	mcr	p15, 0, r9, c1, c0, 1	@ auxiliary control reg
+
+	@ temporarily map resume_turn_on_mmu into the page table,
+	@ otherwise prefetch abort occurs after MMU is turned on
+	mov	r0, r10			@ control register
+	mov	r2, r8, lsr #14		@ get TTB0 base
+	mov	r2, r2, lsl #14
+	ldr	r3, =0x542e		@ section flags
 	b	cpu_resume_mmu
 ENDPROC(cpu_xsc3_do_resume)
 #endif

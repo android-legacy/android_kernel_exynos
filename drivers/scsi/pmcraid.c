@@ -1404,11 +1404,22 @@ enum {
 };
 #define PMCRAID_AEN_CMD_MAX (__PMCRAID_AEN_CMD_MAX - 1)
 
+static struct genl_multicast_group pmcraid_mcgrps[] = {
+	{ .name = "events", /* not really used - see ID discussion below */ },
+};
+
 static struct genl_family pmcraid_event_family = {
-	.id = GENL_ID_GENERATE,
+	/*
+	 * Due to prior multicast group abuse (the code having assumed that
+	 * the family ID can be used as a multicast group ID) we need to
+	 * statically allocate a family (and thus group) ID.
+	 */
+	.id = GENL_ID_PMCRAID,
 	.name = "pmcraid",
 	.version = 1,
-	.maxattr = PMCRAID_AEN_ATTR_MAX
+	.maxattr = PMCRAID_AEN_ATTR_MAX,
+	.mcgrps = pmcraid_mcgrps,
+	.n_mcgrps = ARRAY_SIZE(pmcraid_mcgrps),
 };
 
 /**
@@ -1511,8 +1522,8 @@ static int pmcraid_notify_aen(
 		return result;
 	}
 
-	result =
-		genlmsg_multicast(skb, 0, pmcraid_event_family.id, GFP_ATOMIC);
+	result = genlmsg_multicast(&pmcraid_event_family, skb,
+				   0, 0, GFP_ATOMIC);
 
 	/* If there are no listeners, genlmsg_multicast may return non-zero
 	 * value.
@@ -4102,10 +4113,10 @@ static long pmcraid_chr_ioctl(
 	struct pmcraid_ioctl_header *hdr = NULL;
 	int retval = -ENOTTY;
 
-	hdr = kmalloc(sizeof(struct pmcraid_ioctl_header), GFP_KERNEL);
+	hdr = kmalloc(GFP_KERNEL, sizeof(struct pmcraid_ioctl_header));
 
 	if (!hdr) {
-		pmcraid_err("failed to allocate memory for ioctl header\n");
+		pmcraid_err("faile to allocate memory for ioctl header\n");
 		return -ENOMEM;
 	}
 
@@ -4328,6 +4339,7 @@ static struct scsi_host_template pmcraid_host_template = {
 	.this_id = -1,
 	.sg_tablesize = PMCRAID_MAX_IOADLS,
 	.max_sectors = PMCRAID_IOA_MAX_SECTORS,
+	.no_write_same = 1,
 	.cmd_per_lun = PMCRAID_MAX_CMD_PER_LUN,
 	.use_clustering = ENABLE_CLUSTERING,
 	.shost_attrs = pmcraid_host_attrs,
@@ -5459,7 +5471,7 @@ static void __devexit pmcraid_remove(struct pci_dev *pdev)
 	pmcraid_shutdown(pdev);
 
 	pmcraid_disable_interrupts(pinstance, ~0);
-	flush_work_sync(&pinstance->worker_q);
+	flush_work(&pinstance->worker_q);
 
 	pmcraid_kill_tasklets(pinstance);
 	pmcraid_unregister_interrupt_handler(pinstance);
@@ -6072,7 +6084,6 @@ out_release_regions:
 
 out_disable_device:
 	atomic_dec(&pmcraid_adapter_count);
-	pci_set_drvdata(pdev, NULL);
 	pci_disable_device(pdev);
 	return -ENODEV;
 }

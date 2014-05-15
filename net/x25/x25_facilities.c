@@ -21,6 +21,8 @@
  *					on response.
  */
 
+#define pr_fmt(fmt) "X25: " fmt
+
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/skbuff.h>
@@ -109,7 +111,7 @@ int x25_parse_facilities(struct sk_buff *skb, struct x25_facilities *facilities,
 			case X25_MARKER:
 				break;
 			default:
-				printk(KERN_DEBUG "X.25: unknown facility "
+				pr_debug("unknown facility "
 				       "%02X, value %02X\n",
 				       p[0], p[1]);
 				break;
@@ -132,7 +134,7 @@ int x25_parse_facilities(struct sk_buff *skb, struct x25_facilities *facilities,
 				*vc_fac_mask |= X25_MASK_WINDOW_SIZE;
 				break;
 			default:
-				printk(KERN_DEBUG "X.25: unknown facility "
+				pr_debug("unknown facility "
 				       "%02X, values %02X, %02X\n",
 				       p[0], p[1], p[2]);
 				break;
@@ -143,7 +145,7 @@ int x25_parse_facilities(struct sk_buff *skb, struct x25_facilities *facilities,
 		case X25_FAC_CLASS_C:
 			if (len < 4)
 				return -1;
-			printk(KERN_DEBUG "X.25: unknown facility %02X, "
+			pr_debug("unknown facility %02X, "
 			       "values %02X, %02X, %02X\n",
 			       p[0], p[1], p[2], p[3]);
 			p   += 4;
@@ -168,7 +170,7 @@ int x25_parse_facilities(struct sk_buff *skb, struct x25_facilities *facilities,
 				*vc_fac_mask |= X25_MASK_CALLED_AE;
 				break;
 			default:
-				printk(KERN_DEBUG "X.25: unknown facility %02X,"
+				pr_debug("unknown facility %02X,"
 					"length %d\n", p[0], p[1]);
 				break;
 			}
@@ -231,7 +233,7 @@ int x25_create_facilities(unsigned char *buffer,
 	}
 
 	if (dte_facs->calling_len && (facil_mask & X25_MASK_CALLING_AE)) {
-		unsigned bytecount = (dte_facs->calling_len + 1) >> 1;
+		unsigned int bytecount = (dte_facs->calling_len + 1) >> 1;
 		*p++ = X25_FAC_CALLING_AE;
 		*p++ = 1 + bytecount;
 		*p++ = dte_facs->calling_len;
@@ -240,7 +242,7 @@ int x25_create_facilities(unsigned char *buffer,
 	}
 
 	if (dte_facs->called_len && (facil_mask & X25_MASK_CALLED_AE)) {
-		unsigned bytecount = (dte_facs->called_len % 2) ?
+		unsigned int bytecount = (dte_facs->called_len % 2) ?
 		dte_facs->called_len / 2 + 1 :
 		dte_facs->called_len / 2;
 		*p++ = X25_FAC_CALLED_AE;
@@ -337,12 +339,12 @@ void x25_limit_facilities(struct x25_facilities *facilities,
 
 	if (!nb->extended) {
 		if (facilities->winsize_in  > 7) {
-			printk(KERN_DEBUG "X.25: incoming winsize limited to 7\n");
+			pr_debug("incoming winsize limited to 7\n");
 			facilities->winsize_in = 7;
 		}
 		if (facilities->winsize_out > 7) {
 			facilities->winsize_out = 7;
-			printk( KERN_DEBUG "X.25: outgoing winsize limited to 7\n");
+			pr_debug("outgoing winsize limited to 7\n");
 		}
 	}
 }

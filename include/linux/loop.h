@@ -44,7 +44,7 @@ struct loop_device {
 	int		lo_encrypt_key_size;
 	struct loop_func_table *lo_encryption;
 	__u32           lo_init[2];
-	uid_t		lo_key_owner;	/* Who set the key */
+	kuid_t		lo_key_owner;	/* Who set the key */
 	int		(*ioctl)(struct loop_device *, int cmd, 
 				 unsigned long arg); 
 
@@ -57,10 +57,13 @@ struct loop_device {
 
 	spinlock_t		lo_lock;
 	struct bio_list		lo_bio_list;
+	unsigned int		lo_bio_count;
 	int			lo_state;
 	struct mutex		lo_ctl_mutex;
 	struct task_struct	*lo_thread;
 	wait_queue_head_t	lo_event;
+	/* wait queue for incoming requests */
+	wait_queue_head_t	lo_req_wait;
 
 	struct request_queue	*lo_queue;
 	struct gendisk		*lo_disk;

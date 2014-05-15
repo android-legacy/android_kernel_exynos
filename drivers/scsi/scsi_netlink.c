@@ -23,7 +23,6 @@
 #include <linux/security.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
-#include <linux/export.h>
 #include <net/sock.h>
 #include <net/netlink.h>
 
@@ -486,6 +485,10 @@ void
 scsi_netlink_init(void)
 {
 	int error;
+	struct netlink_kernel_cfg cfg = {
+		.input	= scsi_nl_rcv_msg,
+		.groups	= SCSI_NL_GRP_CNT,
+	};
 
 	INIT_LIST_HEAD(&scsi_nl_drivers);
 
@@ -497,8 +500,7 @@ scsi_netlink_init(void)
 	}
 
 	scsi_nl_sock = netlink_kernel_create(&init_net, NETLINK_SCSITRANSPORT,
-				SCSI_NL_GRP_CNT, scsi_nl_rcv_msg, NULL,
-				THIS_MODULE);
+					     &cfg);
 	if (!scsi_nl_sock) {
 		printk(KERN_ERR "%s: register of receive handler failed\n",
 				__func__);

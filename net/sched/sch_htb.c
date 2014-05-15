@@ -86,7 +86,7 @@ struct htb_class {
 	unsigned int children;
 	struct htb_class *parent;	/* parent class */
 
-	int prio;		/* these two are used only by leaves... */
+	u32 prio;		/* these two are used only by leaves... */
 	int quantum;		/* but stored for parent-to-leaf return */
 
 	union {
@@ -558,9 +558,7 @@ static int htb_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 			__skb_queue_tail(&q->direct_queue, skb);
 			q->direct_pkts++;
 		} else {
-			kfree_skb(skb);
-			sch->qstats.drops++;
-			return NET_XMIT_DROP;
+			return qdisc_drop(skb, sch);
 		}
 #ifdef CONFIG_NET_CLS_ACT
 	} else if (!cl) {
@@ -576,7 +574,6 @@ static int htb_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		}
 		return ret;
 	} else {
-		bstats_update(&cl->bstats, skb);
 		htb_activate(q, cl);
 	}
 
@@ -837,6 +834,7 @@ next:
 	} while (cl != start);
 
 	if (likely(skb != NULL)) {
+		bstats_update(&cl->bstats, skb);
 		cl->un.leaf.deficit[level] -= qdisc_pkt_len(skb);
 		if (cl->un.leaf.deficit[level] < 0) {
 			cl->un.leaf.deficit[level] += cl->quantum;
@@ -943,11 +941,10 @@ static void htb_reset(struct Qdisc *sch)
 {
 	struct htb_sched *q = qdisc_priv(sch);
 	struct htb_class *cl;
-	struct hlist_node *n;
 	unsigned int i;
 
 	for (i = 0; i < q->clhash.hashsize; i++) {
-		hlist_for_each_entry(cl, n, &q->clhash.hash[i], common.hnode) {
+		hlist_for_each_entry(cl, &q->clhash.hash[i], common.hnode) {
 			if (cl->level)
 				memset(&cl->un.inner, 0, sizeof(cl->un.inner));
 			else {
@@ -1051,7 +1048,8 @@ static int htb_dump(struct Qdisc *sch, struct sk_buff *skb)
 	nest = nla_nest_start(skb, TCA_OPTIONS);
 	if (nest == NULL)
 		goto nla_put_failure;
-	NLA_PUT(skb, TCA_HTB_INIT, sizeof(gopt), &gopt);
+	if (nla_put(skb, TCA_HTB_INIT, sizeof(gopt), &gopt))
+		goto nla_put_failure;
 	nla_nest_end(skb, nest);
 
 	spin_unlock_bh(root_lock);
@@ -1090,7 +1088,8 @@ static int htb_dump_class(struct Qdisc *sch, unsigned long arg,
 	opt.quantum = cl->quantum;
 	opt.prio = cl->prio;
 	opt.level = cl->level;
-	NLA_PUT(skb, TCA_HTB_PARMS, sizeof(opt), &opt);
+	if (nla_put(skb, TCA_HTB_PARMS, sizeof(opt), &opt))
+		goto nla_put_failure;
 
 	nla_nest_end(skb, nest);
 	spin_unlock_bh(root_lock);
@@ -1213,7 +1212,7 @@ static void htb_destroy_class(struct Qdisc *sch, struct htb_class *cl)
 static void htb_destroy(struct Qdisc *sch)
 {
 	struct htb_sched *q = qdisc_priv(sch);
-	struct hlist_node *n, *next;
+	struct hlist_node *next;
 	struct htb_class *cl;
 	unsigned int i;
 
@@ -1227,11 +1226,11 @@ static void htb_destroy(struct Qdisc *sch)
 	tcf_destroy_chain(&q->filter_list);
 
 	for (i = 0; i < q->clhash.hashsize; i++) {
-		hlist_for_each_entry(cl, n, &q->clhash.hash[i], common.hnode)
+		hlist_for_each_entry(cl, &q->clhash.hash[i], common.hnode)
 			tcf_destroy_chain(&cl->filter_list);
 	}
 	for (i = 0; i < q->clhash.hashsize; i++) {
-		hlist_for_each_entry_safe(cl, n, next, &q->clhash.hash[i],
+		hlist_for_each_entry_safe(cl, next, &q->clhash.hash[i],
 					  common.hnode)
 			htb_destroy_class(sch, cl);
 	}
@@ -1521,14 +1520,13 @@ static void htb_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 {
 	struct htb_sched *q = qdisc_priv(sch);
 	struct htb_class *cl;
-	struct hlist_node *n;
 	unsigned int i;
 
 	if (arg->stop)
 		return;
 
 	for (i = 0; i < q->clhash.hashsize; i++) {
-		hlist_for_each_entry(cl, n, &q->clhash.hash[i], common.hnode) {
+		hlist_for_each_entry(cl, &q->clhash.hash[i], common.hnode) {
 			if (arg->count < arg->skip) {
 				arg->count++;
 				continue;

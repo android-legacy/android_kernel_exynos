@@ -95,11 +95,7 @@ static int rated_capacities[] = {
 	2880,	/* Samsung */
 	2880,	/* BYD */
 	2880,	/* Lishen */
-	2880,	/* NEC */
-#ifdef CONFIG_MACH_H4700
-	0,
-	3600,	/* HP iPAQ hx4700 3.7V 3600mAh (359114-001) */
-#endif
+	2880	/* NEC */
 };
 
 /* array is level at temps 0°C, 10°C, 20°C, 30°C, 40°C
@@ -355,8 +351,7 @@ static void ds2760_battery_external_power_changed(struct power_supply *psy)
 
 	dev_dbg(di->dev, "%s\n", __func__);
 
-	cancel_delayed_work(&di->monitor_work);
-	queue_delayed_work(di->monitor_wqueue, &di->monitor_work, HZ/10);
+	mod_delayed_work(di->monitor_wqueue, &di->monitor_work, HZ/10);
 }
 
 
@@ -401,8 +396,7 @@ static void ds2760_battery_set_charged(struct power_supply *psy)
 
 	/* postpone the actual work by 20 secs. This is for debouncing GPIO
 	 * signals and to let the current value settle. See AN4188. */
-	cancel_delayed_work(&di->set_charged_work);
-	queue_delayed_work(di->monitor_wqueue, &di->set_charged_work, HZ * 20);
+	mod_delayed_work(di->monitor_wqueue, &di->set_charged_work, HZ * 20);
 }
 
 static int ds2760_battery_get_property(struct power_supply *psy,
@@ -616,8 +610,7 @@ static int ds2760_battery_resume(struct platform_device *pdev)
 	di->charge_status = POWER_SUPPLY_STATUS_UNKNOWN;
 	power_supply_changed(&di->bat);
 
-	cancel_delayed_work(&di->monitor_work);
-	queue_delayed_work(di->monitor_wqueue, &di->monitor_work, HZ);
+	mod_delayed_work(di->monitor_wqueue, &di->monitor_work, HZ);
 
 	return 0;
 }
@@ -641,7 +634,18 @@ static struct platform_driver ds2760_battery_driver = {
 	.resume	  = ds2760_battery_resume,
 };
 
-module_platform_driver(ds2760_battery_driver);
+static int __init ds2760_battery_init(void)
+{
+	return platform_driver_register(&ds2760_battery_driver);
+}
+
+static void __exit ds2760_battery_exit(void)
+{
+	platform_driver_unregister(&ds2760_battery_driver);
+}
+
+module_init(ds2760_battery_init);
+module_exit(ds2760_battery_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Szabolcs Gyurko <szabolcs.gyurko@tlt.hu>, "

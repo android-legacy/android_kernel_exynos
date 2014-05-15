@@ -20,6 +20,7 @@
 #include <linux/hid.h>
 #include <linux/hid-debug.h>
 #include <linux/input.h>
+#include <linux/module.h>
 #include "hid-ids.h"
 #include "usbhid/usbhid.h"
 #include <linux/usb.h>
@@ -36,7 +37,6 @@
 
 #include <linux/completion.h>
 #include <linux/uaccess.h>
-#include <linux/module.h>
 
 #define PICOLCD_NAME "PicoLCD (graphic)"
 
@@ -633,7 +633,7 @@ struct picolcd_fb_cleanup_item {
 	struct picolcd_fb_cleanup_item *next;
 };
 static struct picolcd_fb_cleanup_item *fb_pending;
-static DEFINE_SPINLOCK(fb_pending_lock);
+DEFINE_SPINLOCK(fb_pending_lock);
 
 static void picolcd_fb_do_cleanup(struct work_struct *data)
 {
@@ -658,7 +658,7 @@ static void picolcd_fb_do_cleanup(struct work_struct *data)
 	} while (item);
 }
 
-static DECLARE_WORK(picolcd_fb_cleanup, picolcd_fb_do_cleanup);
+DECLARE_WORK(picolcd_fb_cleanup, picolcd_fb_do_cleanup);
 
 static int picolcd_fb_open(struct fb_info *info, int u)
 {
@@ -2398,7 +2398,7 @@ static int picolcd_raw_event(struct hid_device *hdev,
 #ifdef CONFIG_PM
 static int picolcd_suspend(struct hid_device *hdev, pm_message_t message)
 {
-	if (PMSG_IS_AUTO(message))
+	if (message.event & PM_EVENT_AUTO)
 		return 0;
 
 	picolcd_suspend_backlight(hid_get_drvdata(hdev));
@@ -2741,7 +2741,7 @@ static void __exit picolcd_exit(void)
 {
 	hid_unregister_driver(&picolcd_driver);
 #ifdef CONFIG_HID_PICOLCD_FB
-	flush_work_sync(&picolcd_fb_cleanup);
+	flush_work(&picolcd_fb_cleanup);
 	WARN_ON(fb_pending);
 #endif
 }

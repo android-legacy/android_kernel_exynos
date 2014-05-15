@@ -92,8 +92,8 @@ static inline struct net *ib_net(struct inet_bind_bucket *ib)
 	return read_pnet(&ib->ib_net);
 }
 
-#define inet_bind_bucket_for_each(tb, pos, head) \
-	hlist_for_each_entry(tb, pos, head, node)
+#define inet_bind_bucket_for_each(tb, head) \
+	hlist_for_each_entry(tb, head, node)
 
 struct inet_bind_hashbucket {
 	spinlock_t		lock;
@@ -379,10 +379,10 @@ static inline struct sock *__inet_lookup_skb(struct inet_hashinfo *hashinfo,
 					     const __be16 sport,
 					     const __be16 dport)
 {
-	struct sock *sk;
+	struct sock *sk = skb_steal_sock(skb);
 	const struct iphdr *iph = ip_hdr(skb);
 
-	if (unlikely(sk = skb_steal_sock(skb)))
+	if (sk)
 		return sk;
 	else
 		return __inet_lookup(dev_net(skb_dst(skb)->dev), hashinfo,

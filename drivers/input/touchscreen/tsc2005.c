@@ -747,7 +747,17 @@ static struct spi_driver tsc2005_driver = {
 	.remove	= __devexit_p(tsc2005_remove),
 };
 
-module_spi_driver(tsc2005_driver);
+static int __init tsc2005_init(void)
+{
+	return spi_register_driver(&tsc2005_driver);
+}
+module_init(tsc2005_init);
+
+static void __exit tsc2005_exit(void)
+{
+	spi_unregister_driver(&tsc2005_driver);
+}
+module_exit(tsc2005_exit);
 
 MODULE_AUTHOR("Lauri Leukkunen <lauri.leukkunen@nokia.com>");
 MODULE_DESCRIPTION("TSC2005 Touchscreen Driver");

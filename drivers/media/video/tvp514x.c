@@ -32,7 +32,6 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/videodev2.h>
-#include <linux/module.h>
 
 #include <media/v4l2-device.h>
 #include <media/v4l2-common.h>
@@ -1163,4 +1162,15 @@ static struct i2c_driver tvp514x_driver = {
 	.id_table = tvp514x_id,
 };
 
-module_i2c_driver(tvp514x_driver);
+static int __init tvp514x_init(void)
+{
+	return i2c_add_driver(&tvp514x_driver);
+}
+
+static void __exit tvp514x_exit(void)
+{
+	i2c_del_driver(&tvp514x_driver);
+}
+
+module_init(tvp514x_init);
+module_exit(tvp514x_exit);

@@ -58,7 +58,7 @@ struct cma_alloc_request {
 
 #ifdef __KERNEL__
 
-#include <linux/rbtree.h>
+#include <linux/rbtree_augmented.h>
 #include <linux/list.h>
 #if defined CONFIG_CMA_SYSFS
 #  include <linux/kobject.h>
@@ -488,6 +488,12 @@ void __init cma_early_regions_reserve(int (*reserve)(struct cma_region *reg));
 #define cma_early_region_reserve(region)   ((int)-EOPNOTSUPP)
 #define cma_early_regions_reserve(reserve) do { } while (0)
 
+#endif
+
+#ifdef CONFIG_CMA
+bool cma_is_registered_region(phys_addr_t start, size_t size);
+#else
+#define cma_is_registered_region(start, size)	(false)
 #endif
 
 #endif

@@ -24,10 +24,11 @@
 #include <linux/syscore_ops.h>
 #include <linux/timer.h>
 #include <linux/irq.h>
+#include <linux/sched_clock.h>
 
-#include <asm/leds.h>
+#include <linux/mc146818rtc.h>
+
 #include <asm/thread_info.h>
-#include <asm/sched_clock.h>
 #include <asm/stacktrace.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
@@ -37,17 +38,19 @@
  */
 static struct sys_timer *system_timer;
 
-#if defined(CONFIG_RTC_DRV_CMOS) || defined(CONFIG_RTC_DRV_CMOS_MODULE) || \
-    defined(CONFIG_NVRAM) || defined(CONFIG_NVRAM_MODULE)
+#if defined(CONFIG_RTC_DRV_CMOS) || defined(CONFIG_RTC_DRV_CMOS_MODULE)
 /* this needs a better home */
 DEFINE_SPINLOCK(rtc_lock);
+
+#ifdef CONFIG_RTC_DRV_CMOS_MODULE
 EXPORT_SYMBOL(rtc_lock);
+#endif
 #endif	/* pc-style 'CMOS' RTC support */
 
 /* change this if you have some constant time drift */
 #define USECS_PER_JIFFY	(1000000/HZ)
 
-#ifdef CONFIG_SMP
+#ifdef SHIT
 unsigned long profile_pc(struct pt_regs *regs)
 {
 	struct stackframe frame;
@@ -71,7 +74,7 @@ EXPORT_SYMBOL(profile_pc);
 #endif
 
 #ifdef CONFIG_ARCH_USES_GETTIMEOFFSET
-u32 arch_gettimeoffset(void)
+static u32 arm_gettimeoffset(void)
 {
 	if (system_timer->offset != NULL)
 		return system_timer->offset() * 1000;
@@ -80,21 +83,6 @@ u32 arch_gettimeoffset(void)
 }
 #endif /* CONFIG_ARCH_USES_GETTIMEOFFSET */
 
-#ifdef CONFIG_LEDS_TIMER
-static inline void do_leds(void)
-{
-	static unsigned int count = HZ/2;
-
-	if (--count == 0) {
-		count = HZ/2;
-		leds_event(led_timer);
-	}
-}
-#else
-#define	do_leds()
-#endif
-
-
 #ifndef CONFIG_GENERIC_CLOCKEVENTS
 /*
  * Kernel system timer support.
@@ -102,7 +90,6 @@ static inline void do_leds(void)
 void timer_tick(void)
 {
 	profile_tick(CPU_PROFILING);
-	do_leds();
 	xtime_update(1);
 #ifndef CONFIG_SMP
 	update_process_times(user_mode(get_irq_regs()));
@@ -145,8 +132,11 @@ device_initcall(timer_init_syscore_ops);
 
 void __init time_init(void)
 {
+#ifdef CONFIG_ARCH_USES_GETTIMEOFFSET
+	arch_gettimeoffset = arm_gettimeoffset;
+#endif
+
 	system_timer = machine_desc->timer;
 	system_timer->init();
-	sched_clock_postinit();
 }
 

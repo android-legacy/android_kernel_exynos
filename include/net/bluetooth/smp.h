@@ -20,6 +20,9 @@
    SOFTWARE IS DISCLAIMED.
 */
 
+#ifdef CONFIG_BT_TIZEN
+#include "tizen/smp.h"
+#else
 #ifndef __SMP_H
 #define __SMP_H
 
@@ -77,7 +80,7 @@ struct smp_cmd_encrypt_info {
 
 #define SMP_CMD_MASTER_IDENT	0x07
 struct smp_cmd_master_ident {
-	__u16	ediv;
+	__le16	ediv;
 	__u8	rand[8];
 } __packed;
 
@@ -108,8 +111,8 @@ struct smp_cmd_security_req {
 #define SMP_CONFIRM_FAILED		0x04
 #define SMP_PAIRING_NOTSUPP		0x05
 #define SMP_ENC_KEY_SIZE		0x06
-#define SMP_CMD_NOTSUPP		0x07
-#define SMP_UNSPECIFIED		0x08
+#define SMP_CMD_NOTSUPP			0x07
+#define SMP_UNSPECIFIED			0x08
 #define SMP_REPEATED_ATTEMPTS		0x09
 
 #define SMP_MIN_ENC_KEY_SIZE		7
@@ -123,8 +126,8 @@ struct smp_chan {
 	struct l2cap_conn *conn;
 	u8		preq[7]; /* SMP Pairing Request */
 	u8		prsp[7]; /* SMP Pairing Response */
-	u8              prnd[16]; /* SMP Pairing Random (local) */
-	u8              rrnd[16]; /* SMP Pairing Random (remote) */
+	u8		prnd[16]; /* SMP Pairing Random (local) */
+	u8		rrnd[16]; /* SMP Pairing Random (remote) */
 	u8		pcnf[16]; /* SMP Pairing Confirm */
 	u8		tk[16]; /* SMP Temporary Key */
 	u8		enc_key_size;
@@ -144,3 +147,5 @@ int smp_user_confirm_reply(struct hci_conn *conn, u16 mgmt_op, __le32 passkey);
 void smp_chan_destroy(struct l2cap_conn *conn);
 
 #endif /* __SMP_H */
+
+#endif /* BT_TIZEN */

@@ -76,6 +76,20 @@ inline int p9_is_proto_dotu(struct p9_client *clnt)
 }
 EXPORT_SYMBOL(p9_is_proto_dotu);
 
+/*
+ * Some error codes are taken directly from the server replies,
+ * make sure they are valid.
+ */
+static int safe_errno(int err)
+{
+	if ((err > 0) || (err < -MAX_ERRNO)) {
+		p9_debug(P9_DEBUG_ERROR, "Invalid error code %d\n", err);
+		return -EPROTO;
+	}
+	return err;
+}
+
+
 /* Interpret mount option for protocol version */
 static int get_protocol_version(char *s)
 {
@@ -740,17 +754,9 @@ p9_client_rpc(struct p9_client *c, int8_t type, const char *fmt, ...)
 			c->status = Disconnected;
 		goto reterr;
 	}
-again:
 	/* Wait for the response */
 	err = wait_event_interruptible(*req->wq,
 				       req->status >= REQ_STATUS_RCVD);
-
-	if ((err == -ERESTARTSYS) && (c->status == Connected)
-				  && (type == P9_TFLUSH)) {
-		sigpending = 1;
-		clear_thread_flag(TIF_SIGPENDING);
-		goto again;
-	}
 
 	if (req->status == REQ_STATUS_ERROR) {
 		p9_debug(P9_DEBUG_ERROR, "req_status error %d\n", req->t_err);
@@ -782,7 +788,7 @@ again:
 		return req;
 reterr:
 	p9_free_req(c, req);
-	return ERR_PTR(err);
+	return ERR_PTR(safe_errno(err));
 }
 
 /**
@@ -865,7 +871,7 @@ static struct p9_req_t *p9_client_zc_rpc(struct p9_client *c, int8_t type,
 		return req;
 reterr:
 	p9_free_req(c, req);
-	return ERR_PTR(err);
+	return ERR_PTR(safe_errno(err));
 }
 
 static struct p9_fid *p9_fid_create(struct p9_client *clnt)
@@ -1428,7 +1434,6 @@ int p9_client_clunk(struct p9_fid *fid)
 	int err;
 	struct p9_client *clnt;
 	struct p9_req_t *req;
-	int retries = 0;
 
 	if (!fid) {
 		pr_warn("%s (%d): Trying to clunk with NULL fid\n",
@@ -1437,9 +1442,7 @@ int p9_client_clunk(struct p9_fid *fid)
 		return 0;
 	}
 
-again:
-	p9_debug(P9_DEBUG_9P, ">>> TCLUNK fid %d (try %d)\n", fid->fid,
-								retries);
+	p9_debug(P9_DEBUG_9P, ">>> TCLUNK fid %d\n", fid->fid);
 	err = 0;
 	clnt = fid->clnt;
 
@@ -1455,14 +1458,8 @@ again:
 error:
 	/*
 	 * Fid is not valid even after a failed clunk
-	 * If interrupted, retry once then give up and
-	 * leak fid until umount.
 	 */
-	if (err == -ERESTARTSYS) {
-		if (retries++ == 0)
-			goto again;
-	} else
-		p9_fid_destroy(fid);
+	p9_fid_destroy(fid);
 	return err;
 }
 EXPORT_SYMBOL(p9_client_clunk);
@@ -1487,10 +1484,7 @@ int p9_client_remove(struct p9_fid *fid)
 
 	p9_free_req(clnt, req);
 error:
-	if (err == -ERESTARTSYS)
-		p9_client_clunk(fid);
-	else
-		p9_fid_destroy(fid);
+	p9_fid_destroy(fid);
 	return err;
 }
 EXPORT_SYMBOL(p9_client_remove);
@@ -1530,7 +1524,7 @@ p9_client_read(struct p9_fid *fid, char *data, char __user *udata, u64 offset,
 
 
 	p9_debug(P9_DEBUG_9P, ">>> TREAD fid %d offset %llu %d\n",
-		   fid->fid, (long long unsigned) offset, count);
+		   fid->fid, (unsigned long long) offset, count);
 	err = 0;
 	clnt = fid->clnt;
 
@@ -1548,7 +1542,7 @@ p9_client_read(struct p9_fid *fid, char *data, char __user *udata, u64 offset,
 			kernel_buf = 1;
 			indata = data;
 		} else
-			indata = (char *)udata;
+			indata = (__force char *)udata;
 		/*
 		 * response header len is 11
 		 * PDU Header(7) + IO Size (4)
@@ -1605,7 +1599,7 @@ p9_client_write(struct p9_fid *fid, char *data, const char __user *udata,
 	struct p9_req_t *req;
 
 	p9_debug(P9_DEBUG_9P, ">>> TWRITE fid %d offset %llu count %d\n",
-				fid->fid, (long long unsigned) offset, count);
+				fid->fid, (unsigned long long) offset, count);
 	err = 0;
 	clnt = fid->clnt;
 
@@ -2040,7 +2034,7 @@ int p9_client_readdir(struct p9_fid *fid, char *data, u32 count, u64 offset)
 	char *dataptr;
 
 	p9_debug(P9_DEBUG_9P, ">>> TREADDIR fid %d offset %llu count %d\n",
-				fid->fid, (long long unsigned) offset, count);
+				fid->fid, (unsigned long long) offset, count);
 
 	err = 0;
 	clnt = fid->clnt;

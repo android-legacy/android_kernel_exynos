@@ -6,6 +6,14 @@ be removed from this file.
 
 ---------------------------
 
+What: /proc/sys/vm/nr_pdflush_threads
+When: 2012
+Why: Since pdflush is deprecated, the interface exported in /proc/sys/vm/
+     should be removed.
+Who: Wanpeng Li <liwp@linux.vnet.ibm.com>
+
+---------------------------
+
 What:	CONFIG_APM_CPU_IDLE, and its ability to call APM BIOS in idle
 When:	2012
 Why:	This optional sub-feature of APM is of dubious reliability,
@@ -77,6 +85,17 @@ Who:	Robin Getz <rgetz@blackfin.uclinux.org> & Matt Mackall <mpm@selenic.com>
 
 ---------------------------
 
+What:	Deprecated snapshot ioctls
+When:	2.6.36
+
+Why:	The ioctls in kernel/power/user.c were marked as deprecated long time
+	ago. Now they notify users about that so that they need to replace
+	their userspace. After some more time, remove them completely.
+
+Who:	Jiri Slaby <jirislaby@gmail.com>
+
+---------------------------
+
 What:	The ieee80211_regdom module parameter
 When:	March 2010 / desktop catchup
 
@@ -138,6 +157,20 @@ Why:	/proc/<pid>/oom_adj allows userspace to influence the oom killer's
 	suppressed until the kernel is rebooted.
 
 ---------------------------
+
+What:	CS5535/CS5536 obsolete GPIO driver
+When:	June 2011
+Files:	drivers/staging/cs5535_gpio/*
+Check:	drivers/staging/cs5535_gpio/cs5535_gpio.c
+Why:	A newer driver replaces this; it is drivers/gpio/cs5535-gpio.c, and
+	integrates with the Linux GPIO subsystem.  The old driver has been
+	moved to staging, and will be removed altogether around 3.0.
+	Please test the new driver, and ensure that the functionality you
+	need and any bugfixes from the old driver are available in the new
+	one.
+Who:	Andres Salomon <dilinger@queued.net>
+
+--------------------------
 
 What:	remove EXPORT_SYMBOL(kernel_thread)
 When:	August 2006
@@ -242,6 +275,15 @@ Who:	Ravikiran Thirumalai <kiran@scalex86.org>
 
 ---------------------------
 
+What:	CONFIG_THERMAL_HWMON
+When:	January 2009
+Why:	This option was introduced just to allow older lm-sensors userspace
+	to keep working over the upgrade to 2.6.26. At the scheduled time of
+	removal fixed lm-sensors (2.x or 3.x) should be readily available.
+Who:	Rene Herman <rene.herman@gmail.com>
+
+---------------------------
+
 What:	Code that is now under CONFIG_WIRELESS_EXT_SYSFS
 	(in net/core/net-sysfs.c)
 When:	3.5
@@ -342,6 +384,15 @@ Who: 	anybody or Florian Mickler <florian@mickler.org>
 
 ----------------------------
 
+What:	KVM paravirt mmu host support
+When:	January 2011
+Why:	The paravirt mmu host support is slower than non-paravirt mmu, both
+	on newer and older hardware.  It is already not exposed to the guest,
+	and kept only for live migration purposes.
+Who:	Avi Kivity <avi@redhat.com>
+
+----------------------------
+
 What:	iwlwifi 50XX module parameters
 When:	3.0
 Why:	The "..50" modules parameters were used to configure 5000 series and
@@ -360,14 +411,6 @@ Why:	Internal alias support has been present in module-init-tools for some
 	with no impact.
 
 Who:	Wey-Yi Guy <wey-yi.w.guy@intel.com>
-
----------------------------
-
-What:	xt_NOTRACK
-Files:	net/netfilter/xt_NOTRACK.c
-When:	April 2011
-Why:	Superseded by xt_CT
-Who:	Netfilter developer team <netfilter-devel@vger.kernel.org>
 
 ----------------------------
 
@@ -394,6 +437,16 @@ Why:	Hareware scan is the prefer method for iwlwifi devices for
 	iwlwifi devices.
 
 Who:	Wey-Yi Guy <wey-yi.w.guy@intel.com>
+
+----------------------------
+
+What:   access to nfsd auth cache through sys_nfsservctl or '.' files
+        in the 'nfsd' filesystem.
+When:   3.0
+Why:    This is a legacy interface which have been replaced by a more
+        dynamic cache.  Continuing to maintain this interface is an
+        unnecessary burden.
+Who:    NeilBrown <neilb@suse.de>
 
 ----------------------------
 
@@ -431,6 +484,40 @@ Who:	Jean Delvare <khali@linux-fr.org>
 
 ----------------------------
 
+What:	Support for UVCIOC_CTRL_ADD in the uvcvideo driver
+When:	3.2
+Why:	The information passed to the driver by this ioctl is now queried
+	dynamically from the device.
+Who:	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
+
+----------------------------
+
+What:	Support for UVCIOC_CTRL_MAP_OLD in the uvcvideo driver
+When:	3.2
+Why:	Used only by applications compiled against older driver versions.
+	Superseded by UVCIOC_CTRL_MAP which supports V4L2 menu controls.
+Who:	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
+
+----------------------------
+
+What:	Support for UVCIOC_CTRL_GET and UVCIOC_CTRL_SET in the uvcvideo driver
+When:	3.2
+Why:	Superseded by the UVCIOC_CTRL_QUERY ioctl.
+Who:	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
+
+----------------------------
+
+What:	For VIDIOC_S_FREQUENCY the type field must match the device node's type.
+	If not, return -EINVAL.
+When:	3.2
+Why:	It makes no sense to switch the tuner to radio mode by calling
+	VIDIOC_S_FREQUENCY on a video node, or to switch the tuner to tv mode by
+	calling VIDIOC_S_FREQUENCY on a radio node. This is the first step of a
+	move to more consistent handling of tv and radio tuners.
+Who:	Hans Verkuil <hans.verkuil@cisco.com>
+
+----------------------------
+
 What:	Opening a radio device node will no longer automatically switch the
 	tuner mode from tv to radio.
 When:	3.3
@@ -439,6 +526,19 @@ Why:	Just opening a V4L device should not change the state of the hardware
 	switch to radio mode by calling VIDIOC_S_FREQUENCY. This is the second
 	and last step of the move to consistent handling of tv and radio tuners.
 Who:	Hans Verkuil <hans.verkuil@cisco.com>
+
+----------------------------
+
+What:	CONFIG_CFG80211_WEXT
+When:	as soon as distributions ship new wireless tools, ie. wpa_supplicant 1.0
+	and NetworkManager/connman/etc. that are able to use nl80211
+Why:	Wireless extensions are deprecated, and userland tools are moving to
+	using nl80211. New drivers are no longer using wireless extensions,
+	and while there might still be old drivers, both new drivers and new
+	userland no longer needs them and they can't be used for an feature
+	developed in the past couple of years. As such, compatibility with
+	wireless extensions in new drivers will be removed.
+Who:	Johannes Berg <johannes@sipsolutions.net>
 
 ----------------------------
 
@@ -460,22 +560,7 @@ Why:    In 3.0, we can now autodetect internal 3G device and already have
 	information log when acer-wmi initial.
 Who:    Lee, Chun-Yi <jlee@novell.com>
 
----------------------------
-
-What:	/sys/devices/platform/_UDC_/udc/_UDC_/is_dualspeed file and
-	is_dualspeed line in /sys/devices/platform/ci13xxx_*/udc/device file.
-When:	3.8
-Why:	The is_dualspeed file is superseded by maximum_speed in the same
-	directory and is_dualspeed line in device file is superseded by
-	max_speed line in the same file.
-
-	The maximum_speed/max_speed specifies maximum speed supported by UDC.
-	To check if dualspeeed is supported, check if the value is >= 3.
-	Various possible speeds are defined in <linux/usb/ch9.h>.
-Who:	Michal Nazarewicz <mina86@mina86.com>
-
 ----------------------------
-
 What:	The XFS nodelaylog mount option
 When:	3.3
 Why:	The delaylog mode that has been the default since 2.6.39 has proven
@@ -502,6 +587,20 @@ Why:	The pci_scan_bus_parented() interface creates a new root bus.  The
 	convert to using pci_scan_root_bus() so they can supply a list of
 	bus resources when the bus is created.
 Who:	Bjorn Helgaas <bhelgaas@google.com>
+
+----------------------------
+
+What:	The CAP9 SoC family will be removed
+When:	3.4
+Files:	arch/arm/mach-at91/at91cap9.c
+	arch/arm/mach-at91/at91cap9_devices.c
+	arch/arm/mach-at91/include/mach/at91cap9.h
+	arch/arm/mach-at91/include/mach/at91cap9_matrix.h
+	arch/arm/mach-at91/include/mach/at91cap9_ddrsdr.h
+	arch/arm/mach-at91/board-cap9adk.c
+Why:	The code is not actively maintained and platforms are now hard to find.
+Who:	Nicolas Ferre <nicolas.ferre@atmel.com>
+	Jean-Christophe PLAGNIOL-VILLARD <plagnioj@jcrosoft.com>
 
 ----------------------------
 
@@ -534,18 +633,9 @@ Who:	Kees Cook <keescook@chromium.org>
 
 ----------------------------
 
-What:	setitimer accepts user NULL pointer (value)
-When:	3.6
-Why:	setitimer is not returning -EFAULT if user pointer is NULL. This
-	violates the spec.
-Who:	Sasikantha Babu <sasikanth.v19@gmail.com>
-
-----------------------------
-
-What:	V4L2_CID_HCENTER, V4L2_CID_VCENTER V4L2 controls
-When:	3.7
-Why:	The V4L2_CID_VCENTER, V4L2_CID_HCENTER controls have been deprecated
-	for about 4 years and they are not used by any mainline driver.
-	There are newer controls (V4L2_CID_PAN*, V4L2_CID_TILT*) that provide
-	similar	functionality.
-Who:	Sylwester Nawrocki <sylvester.nawrocki@gmail.com>
+What:	cgroup option updates via remount
+When:	March 2013
+Why:	Remount currently allows changing bound subsystems and
+	release_agent.  Rebinding is hardly useful as it only works
+	when the hierarchy is empty and release_agent itself should be
+	replaced with conventional fsnotify.

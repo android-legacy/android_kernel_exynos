@@ -45,6 +45,7 @@
 #undef	CY_DEBUG_IO
 #undef	CY_DEBUG_COUNT
 #undef	CY_DEBUG_DTR
+#undef	CY_DEBUG_WAIT_UNTIL_SENT
 #undef	CY_DEBUG_INTERRUPTS
 #undef	CY_16Y_HACK
 #undef	CY_ENABLE_MONITORING
@@ -1459,7 +1460,7 @@ static void cy_shutdown(struct cyclades_port *info, struct tty_struct *tty)
 			info->port.xmit_buf = NULL;
 			free_page((unsigned long)temp);
 		}
-		if (tty->termios->c_cflag & HUPCL)
+		if (tty->termios.c_cflag & HUPCL)
 			cyy_change_rts_dtr(info, 0, TIOCM_RTS | TIOCM_DTR);
 
 		cyy_issue_cmd(info, CyCHAN_CTL | CyDIS_RCVR);
@@ -1488,7 +1489,7 @@ static void cy_shutdown(struct cyclades_port *info, struct tty_struct *tty)
 			free_page((unsigned long)temp);
 		}
 
-		if (tty->termios->c_cflag & HUPCL)
+		if (tty->termios.c_cflag & HUPCL)
 			tty_port_lower_dtr_rts(&info->port);
 
 		set_bit(TTY_IO_ERROR, &tty->flags);
@@ -1515,8 +1516,12 @@ static void cy_shutdown(struct cyclades_port *info, struct tty_struct *tty)
 static int cy_open(struct tty_struct *tty, struct file *filp)
 {
 	struct cyclades_port *info;
-	unsigned int i, line = tty->index;
+	unsigned int i, line;
 	int retval;
+
+	line = tty->index;
+	if (tty->index < 0 || NR_PORTS <= line)
+		return -ENODEV;
 
 	for (i = 0; i < NR_CARDS; i++)
 		if (line < cy_card[i].first_line + cy_card[i].nports &&
@@ -1673,10 +1678,16 @@ static void cy_wait_until_sent(struct tty_struct *tty, int timeout)
 	 */
 	if (!timeout || timeout > 2 * info->timeout)
 		timeout = 2 * info->timeout;
-
+#ifdef CY_DEBUG_WAIT_UNTIL_SENT
+	printk(KERN_DEBUG "In cy_wait_until_sent(%d) check=%d, jiff=%lu...",
+		timeout, char_time, jiffies);
+#endif
 	card = info->card;
 	if (!cy_is_Z(card)) {
 		while (cyy_readb(info, CySRER) & CyTxRdy) {
+#ifdef CY_DEBUG_WAIT_UNTIL_SENT
+			printk(KERN_DEBUG "Not clean (jiff=%lu)...", jiffies);
+#endif
 			if (msleep_interruptible(jiffies_to_msecs(char_time)))
 				break;
 			if (timeout && time_after(jiffies, orig_jiffies +
@@ -1686,6 +1697,9 @@ static void cy_wait_until_sent(struct tty_struct *tty, int timeout)
 	}
 	/* Run one more char cycle */
 	msleep_interruptible(jiffies_to_msecs(char_time * 5));
+#ifdef CY_DEBUG_WAIT_UNTIL_SENT
+	printk(KERN_DEBUG "Clean (jiff=%lu)...done\n", jiffies);
+#endif
 }
 
 static void cy_flush_buffer(struct tty_struct *tty)
@@ -1999,14 +2013,11 @@ static void cy_set_line_char(struct cyclades_port *info, struct tty_struct *tty)
 	int baud, baud_rate = 0;
 	int i;
 
-	if (!tty->termios) /* XXX can this happen at all? */
-		return;
-
 	if (info->line == -1)
 		return;
 
-	cflag = tty->termios->c_cflag;
-	iflag = tty->termios->c_iflag;
+	cflag = tty->termios.c_cflag;
+	iflag = tty->termios.c_iflag;
 
 	/*
 	 * Set up the tty->alt_speed kludge
@@ -2409,7 +2420,7 @@ static int get_lsr_info(struct cyclades_port *info, unsigned int __user *value)
 		/* Not supported yet */
 		return -EINVAL;
 	}
-	return put_user(result, value);
+	return put_user(result, (unsigned long __user *)value);
 }
 
 static int cy_tiocmget(struct tty_struct *tty)
@@ -2825,7 +2836,7 @@ static void cy_set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 	cy_set_line_char(info, tty);
 
 	if ((old_termios->c_cflag & CRTSCTS) &&
-			!(tty->termios->c_cflag & CRTSCTS)) {
+			!(tty->termios.c_cflag & CRTSCTS)) {
 		tty->hw_stopped = 0;
 		cy_start(tty);
 	}
@@ -2837,7 +2848,7 @@ static void cy_set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 	 * or not.  Hence, this may change.....
 	 */
 	if (!(old_termios->c_cflag & CLOCAL) &&
-	    (tty->termios->c_cflag & CLOCAL))
+	    (tty->termios.c_cflag & CLOCAL))
 		wake_up_interruptible(&info->port.open_wait);
 #endif
 }				/* cy_set_termios */
@@ -2899,7 +2910,7 @@ static void cy_throttle(struct tty_struct *tty)
 			info->throttle = 1;
 	}
 
-	if (tty->termios->c_cflag & CRTSCTS) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		if (!cy_is_Z(card)) {
 			spin_lock_irqsave(&card->card_lock, flags);
 			cyy_change_rts_dtr(info, 0, TIOCM_RTS);
@@ -2938,7 +2949,7 @@ static void cy_unthrottle(struct tty_struct *tty)
 			cy_send_xchar(tty, START_CHAR(tty));
 	}
 
-	if (tty->termios->c_cflag & CRTSCTS) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		card = info->card;
 		if (!cy_is_Z(card)) {
 			spin_lock_irqsave(&card->card_lock, flags);
@@ -3363,7 +3374,7 @@ static int __init cy_detect_isa(void)
 
 		/* allocate IRQ */
 		if (request_irq(cy_isa_irq, cyy_interrupt,
-				0, "Cyclom-Y", &cy_card[j])) {
+				IRQF_DISABLED, "Cyclom-Y", &cy_card[j])) {
 			printk(KERN_ERR "Cyclom-Y/ISA found at 0x%lx, but "
 				"could not allocate IRQ#%d.\n",
 				(unsigned long)cy_isa_address, cy_isa_irq);

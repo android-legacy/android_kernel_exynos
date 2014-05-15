@@ -22,6 +22,10 @@
    SOFTWARE IS DISCLAIMED.
 */
 
+#ifdef CONFIG_BT_TIZEN
+#include "tizen/mgmt.h"
+#else
+
 #define MGMT_INDEX_NONE			0xFFFF
 
 #define MGMT_STATUS_SUCCESS		0x00
@@ -166,6 +170,8 @@ struct mgmt_link_key_info {
 	__u8	type;
 	__u8	val[16];
 	__u8	pin_len;
+	__u8	dlen;
+	__u8	data[0];
 } __packed;
 
 #define MGMT_OP_LOAD_LINK_KEYS		0x0012
@@ -341,6 +347,38 @@ struct mgmt_cp_unblock_device {
 } __packed;
 #define MGMT_UNBLOCK_DEVICE_SIZE	MGMT_ADDR_INFO_SIZE
 
+#define MGMT_OP_SET_DEVICE_ID		0x0028
+struct mgmt_cp_set_device_id {
+	__le16	source;
+	__le16	vendor;
+	__le16	product;
+	__le16	version;
+} __packed;
+#define MGMT_SET_DEVICE_ID_SIZE		8
+
+#define MGMT_OP_LE_TEST_END		0x0029
+struct mgmt_rp_le_test_end {
+	__u16 num_pkts;
+} __packed;
+
+/* SSBT :: LJH + */
+#define MGMT_OP_ENCRYPT_LINK		0x0101
+struct mgmt_cp_encrypt_link {
+	bdaddr_t bdaddr;
+	__u8	enable;
+} __packed;
+
+/* monitoring of the RSSI of the link between two Bluetooth devices */
+#define MGMT_OP_READ_RSSI		0x0102
+struct mgmt_cp_read_rssi {
+	bdaddr_t	bdaddr;
+} __packed;
+
+struct mgmt_rp_read_rssi {
+	bdaddr_t	bdaddr;
+	__s8	rssi;
+} __packed;
+
 #define MGMT_EV_CMD_COMPLETE		0x0001
 struct mgmt_ev_cmd_complete {
 	__le16	opcode;
@@ -396,7 +434,16 @@ struct mgmt_ev_device_connected {
 	__u8	eir[0];
 } __packed;
 
+#define MGMT_DEV_DISCONN_UNKNOWN	0x00
+#define MGMT_DEV_DISCONN_TIMEOUT	0x01
+#define MGMT_DEV_DISCONN_LOCAL_HOST	0x02
+#define MGMT_DEV_DISCONN_REMOTE		0x03
+
 #define MGMT_EV_DEVICE_DISCONNECTED	0x000C
+struct mgmt_ev_device_disconnected {
+	struct mgmt_addr_info addr;
+	__u8	reason;
+} __packed;
 
 #define MGMT_EV_CONNECT_FAILED		0x000D
 struct mgmt_ev_connect_failed {
@@ -435,7 +482,7 @@ struct mgmt_ev_auth_failed {
 struct mgmt_ev_device_found {
 	struct mgmt_addr_info addr;
 	__s8	rssi;
-	__u8	flags[4];
+	__le32	flags;
 	__le16	eir_len;
 	__u8	eir[0];
 } __packed;
@@ -460,3 +507,39 @@ struct mgmt_ev_device_unblocked {
 struct mgmt_ev_device_unpaired {
 	struct mgmt_addr_info addr;
 } __packed;
+
+#define MGMT_EV_PASSKEY_NOTIFY		0x0017
+struct mgmt_ev_passkey_notify {
+	struct mgmt_addr_info addr;
+	__le32	passkey;
+	__u8	entered;
+} __packed;
+
+/* SSBT :: KJH + to check encryption changed status */
+#define MGMT_EV_ENCRYPT_CHANGE		0x0101
+struct mgmt_ev_encrypt_change {
+	bdaddr_t	bdaddr;
+	__u8		status;
+} __packed;
+
+#define MGMT_WRITE_LE_HOST_SUPPORTED	0x0103
+struct write_le_host_supported {
+	uint8_t		le;
+	uint8_t		simul;
+} __packed;
+
+#define MGMT_EV_REMOTE_VERSION		0x0104
+struct mgmt_ev_remote_version {
+	bdaddr_t bdaddr;
+	__u8	lmp_ver;
+	__u16	manufacturer;
+	__u16	lmp_subver;
+} __packed;
+
+#define MGMT_EV_REMOTE_FEATURES		0x0105
+struct mgmt_ev_remote_features {
+	bdaddr_t bdaddr;
+	uint8_t features[8];
+} __packed;
+
+#endif /* BT_TIZEN */

@@ -111,9 +111,15 @@ int cfg80211_mgd_wext_siwfreq(struct net_device *dev,
 
 	wdev->wext.connect.channel = chan;
 
-	/* SSID is not set, we just want to switch channel */
+	/*
+	 * SSID is not set, we just want to switch monitor channel,
+	 * this is really just backward compatibility, if the SSID
+	 * is set then we use the channel to select the BSS to use
+	 * to connect to instead. If we were connected on another
+	 * channel we disconnected above and reconnect below.
+	 */
 	if (chan && !wdev->wext.connect.ssid_len) {
-		err = cfg80211_set_freq(rdev, wdev, freq, NL80211_CHAN_NO_HT);
+		err = cfg80211_set_monitor_channel(rdev, freq, NL80211_CHAN_NO_HT);
 		goto out;
 	}
 
@@ -133,7 +139,7 @@ int cfg80211_mgd_wext_giwfreq(struct net_device *dev,
 	struct ieee80211_channel *chan = NULL;
 
 	/* call only for station! */
-	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
+	if ((wdev->iftype != NL80211_IFTYPE_P2P_CLIENT) && WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
 		return -EINVAL;
 
 	wdev_lock(wdev);
@@ -227,13 +233,17 @@ int cfg80211_mgd_wext_giwessid(struct net_device *dev,
 
 	wdev_lock(wdev);
 	if (wdev->current_bss) {
-		const u8 *ie = ieee80211_bss_get_ie(&wdev->current_bss->pub,
-						    WLAN_EID_SSID);
+		const u8 *ie;
+
+		rcu_read_lock();
+		ie = ieee80211_bss_get_ie(&wdev->current_bss->pub,
+					  WLAN_EID_SSID);
 		if (ie) {
 			data->flags = 1;
 			data->length = ie[1];
 			memcpy(ssid, ie + 2, data->length);
 		}
+		rcu_read_unlock();
 	} else if (wdev->wext.connect.ssid && wdev->wext.connect.ssid_len) {
 		data->flags = 1;
 		data->length = wdev->wext.connect.ssid_len;
@@ -276,7 +286,7 @@ int cfg80211_mgd_wext_siwap(struct net_device *dev,
 
 		/* fixed already - and no change */
 		if (wdev->wext.connect.bssid && bssid &&
-		    compare_ether_addr(bssid, wdev->wext.connect.bssid) == 0)
+		    ether_addr_equal(bssid, wdev->wext.connect.bssid))
 			goto out;
 
 		err = __cfg80211_disconnect(rdev, dev,
@@ -370,6 +380,7 @@ int cfg80211_wext_siwgenie(struct net_device *dev,
 	wdev_unlock(wdev);
 	return err;
 }
+EXPORT_SYMBOL_GPL(cfg80211_wext_siwgenie);
 
 int cfg80211_wext_siwmlme(struct net_device *dev,
 			  struct iw_request_info *info,
@@ -406,3 +417,4 @@ int cfg80211_wext_siwmlme(struct net_device *dev,
 
 	return err;
 }
+EXPORT_SYMBOL_GPL(cfg80211_wext_siwmlme);

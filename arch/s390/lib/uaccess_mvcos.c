@@ -1,20 +1,21 @@
 /*
- *  arch/s390/lib/uaccess_mvcos.c
- *
  *  Optimized user space space access functions based on mvcos.
  *
- *    Copyright (C) IBM Corp. 2006
+ *    Copyright IBM Corp. 2006
  *    Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com),
  *		 Gerald Schaefer (gerald.schaefer@de.ibm.com)
  */
 
+#include <linux/jump_label.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/mm.h>
+#include <asm/facility.h>
 #include <asm/uaccess.h>
 #include <asm/futex.h>
 #include "uaccess.h"
 
-#ifndef __s390x__
+#ifndef CONFIG_64BIT
 #define AHI	"ahi"
 #define ALR	"alr"
 #define CLR	"clr"
@@ -28,7 +29,10 @@
 #define SLR	"slgr"
 #endif
 
-static size_t copy_from_user_mvcos(size_t size, const void __user *ptr, void *x)
+static struct static_key have_mvcos = STATIC_KEY_INIT_TRUE;
+
+static inline unsigned long copy_from_user_mvcos(void *x, const void __user *ptr,
+						 unsigned long size)
 {
 	register unsigned long reg0 asm("0") = 0x81UL;
 	unsigned long tmp1, tmp2;
@@ -67,14 +71,16 @@ static size_t copy_from_user_mvcos(size_t size, const void __user *ptr, void *x)
 	return size;
 }
 
-static size_t copy_from_user_mvcos_check(size_t size, const void __user *ptr, void *x)
+unsigned long __copy_from_user(void *to, const void __user *from, unsigned long n)
 {
-	if (size <= 256)
-		return copy_from_user_std(size, ptr, x);
-	return copy_from_user_mvcos(size, ptr, x);
+	if (static_key_true(&have_mvcos))
+		return copy_from_user_mvcos(to, from, n);
+	return copy_from_user_pt(to, from, n);
 }
+EXPORT_SYMBOL(__copy_from_user);
 
-static size_t copy_to_user_mvcos(size_t size, void __user *ptr, const void *x)
+static inline unsigned long copy_to_user_mvcos(void __user *ptr, const void *x,
+					       unsigned long size)
 {
 	register unsigned long reg0 asm("0") = 0x810000UL;
 	unsigned long tmp1, tmp2;
@@ -103,16 +109,16 @@ static size_t copy_to_user_mvcos(size_t size, void __user *ptr, const void *x)
 	return size;
 }
 
-static size_t copy_to_user_mvcos_check(size_t size, void __user *ptr,
-				       const void *x)
+unsigned long __copy_to_user(void __user *to, const void *from, unsigned long n)
 {
-	if (size <= 256)
-		return copy_to_user_std(size, ptr, x);
-	return copy_to_user_mvcos(size, ptr, x);
+	if (static_key_true(&have_mvcos))
+		return copy_to_user_mvcos(to, from, n);
+	return copy_to_user_pt(to, from, n);
 }
+EXPORT_SYMBOL(__copy_to_user);
 
-static size_t copy_in_user_mvcos(size_t size, void __user *to,
-				 const void __user *from)
+static inline unsigned long copy_in_user_mvcos(void __user *to, const void __user *from,
+					       unsigned long size)
 {
 	register unsigned long reg0 asm("0") = 0x810081UL;
 	unsigned long tmp1, tmp2;
@@ -134,7 +140,15 @@ static size_t copy_in_user_mvcos(size_t size, void __user *to,
 	return size;
 }
 
-static size_t clear_user_mvcos(size_t size, void __user *to)
+unsigned long __copy_in_user(void __user *to, const void __user *from, unsigned long n)
+{
+	if (static_key_true(&have_mvcos))
+		return copy_in_user_mvcos(to, from, n);
+	return copy_in_user_pt(to, from, n);
+}
+EXPORT_SYMBOL(__copy_in_user);
+
+static inline unsigned long clear_user_mvcos(void __user *to, unsigned long size)
 {
 	register unsigned long reg0 asm("0") = 0x810000UL;
 	unsigned long tmp1, tmp2;
@@ -162,66 +176,88 @@ static size_t clear_user_mvcos(size_t size, void __user *to)
 	return size;
 }
 
-static size_t strnlen_user_mvcos(size_t count, const char __user *src)
+unsigned long __clear_user(void __user *to, unsigned long size)
 {
+	if (static_key_true(&have_mvcos))
+		return clear_user_mvcos(to, size);
+	return clear_user_pt(to, size);
+}
+EXPORT_SYMBOL(__clear_user);
+
+static inline unsigned long strnlen_user_mvcos(const char __user *src,
+					       unsigned long count)
+{
+	unsigned long done, len, offset, len_str;
 	char buf[256];
-	int rc;
-	size_t done, len, len_str;
 
 	done = 0;
 	do {
-		len = min(count - done, (size_t) 256);
-		rc = uaccess.copy_from_user(len, src + done, buf);
-		if (unlikely(rc == len))
+		offset = (unsigned long)src & ~PAGE_MASK;
+		len = min(256UL, PAGE_SIZE - offset);
+		len = min(count - done, len);
+		if (copy_from_user_mvcos(buf, src, len))
 			return 0;
-		len -= rc;
 		len_str = strnlen(buf, len);
 		done += len_str;
+		src += len_str;
 	} while ((len_str == len) && (done < count));
 	return done + 1;
 }
 
-static size_t strncpy_from_user_mvcos(size_t count, const char __user *src,
-				      char *dst)
+unsigned long __strnlen_user(const char __user *src, unsigned long count)
 {
-	int rc;
-	size_t done, len, len_str;
+	if (static_key_true(&have_mvcos))
+		return strnlen_user_mvcos(src, count);
+	return strnlen_user_pt(src, count);
+}
+EXPORT_SYMBOL(__strnlen_user);
 
+static inline long strncpy_from_user_mvcos(char *dst, const char __user *src,
+					   long count)
+{
+	unsigned long done, len, offset, len_str;
+
+	if (unlikely(count <= 0))
+		return 0;
 	done = 0;
 	do {
-		len = min(count - done, (size_t) 4096);
-		rc = uaccess.copy_from_user(len, src + done, dst);
-		if (unlikely(rc == len))
+		offset = (unsigned long)src & ~PAGE_MASK;
+		len = min(count - done, PAGE_SIZE - offset);
+		if (copy_from_user_mvcos(dst, src, len))
 			return -EFAULT;
-		len -= rc;
 		len_str = strnlen(dst, len);
 		done += len_str;
+		src += len_str;
+		dst += len_str;
 	} while ((len_str == len) && (done < count));
 	return done;
 }
 
-struct uaccess_ops uaccess_mvcos = {
-	.copy_from_user = copy_from_user_mvcos_check,
-	.copy_from_user_small = copy_from_user_std,
-	.copy_to_user = copy_to_user_mvcos_check,
-	.copy_to_user_small = copy_to_user_std,
-	.copy_in_user = copy_in_user_mvcos,
-	.clear_user = clear_user_mvcos,
-	.strnlen_user = strnlen_user_std,
-	.strncpy_from_user = strncpy_from_user_std,
-	.futex_atomic_op = futex_atomic_op_std,
-	.futex_atomic_cmpxchg = futex_atomic_cmpxchg_std,
-};
+long __strncpy_from_user(char *dst, const char __user *src, long count)
+{
+	if (static_key_true(&have_mvcos))
+		return strncpy_from_user_mvcos(dst, src, count);
+	return strncpy_from_user_pt(dst, src, count);
+}
+EXPORT_SYMBOL(__strncpy_from_user);
 
-struct uaccess_ops uaccess_mvcos_switch = {
-	.copy_from_user = copy_from_user_mvcos,
-	.copy_from_user_small = copy_from_user_mvcos,
-	.copy_to_user = copy_to_user_mvcos,
-	.copy_to_user_small = copy_to_user_mvcos,
-	.copy_in_user = copy_in_user_mvcos,
-	.clear_user = clear_user_mvcos,
-	.strnlen_user = strnlen_user_mvcos,
-	.strncpy_from_user = strncpy_from_user_mvcos,
-	.futex_atomic_op = futex_atomic_op_pt,
-	.futex_atomic_cmpxchg = futex_atomic_cmpxchg_pt,
-};
+/*
+ * The uaccess page tabe walk variant can be enforced with the "uaccesspt"
+ * kernel parameter. This is mainly for debugging purposes.
+ */
+static int force_uaccess_pt __initdata;
+
+static int __init parse_uaccess_pt(char *__unused)
+{
+	force_uaccess_pt = 1;
+	return 0;
+}
+early_param("uaccesspt", parse_uaccess_pt);
+
+static int __init uaccess_init(void)
+{
+	if (IS_ENABLED(CONFIG_32BIT) || force_uaccess_pt || !test_facility(27))
+		static_key_slow_dec(&have_mvcos);
+	return 0;
+}
+early_initcall(uaccess_init);

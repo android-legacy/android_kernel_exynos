@@ -4,6 +4,7 @@
 #include <linux/ipv6.h>
 #include <linux/if_vlan.h>
 #include <net/ip.h>
+#include <net/ipv6.h>
 #include <linux/if_tunnel.h>
 #include <linux/if_pppox.h>
 #include <linux/ppp_defs.h>
@@ -35,9 +36,7 @@ again:
 		struct iphdr _iph;
 ip:
 		iph = skb_header_pointer(skb, nhoff, sizeof(_iph), &_iph);
-
-		/* CVE-2013-4348 issue : make sure iph->ihl is not zero ... */
-		if (!iph || iph->ihl < 5)
+		if (!iph)
 			return false;
 
 		if (ip_is_fragment(iph))
@@ -57,8 +56,8 @@ ipv6:
 			return false;
 
 		ip_proto = iph->nexthdr;
-		flow->src = iph->saddr.s6_addr32[3];
-		flow->dst = iph->daddr.s6_addr32[3];
+		flow->src = (__force __be32)ipv6_addr_hash(&iph->saddr);
+		flow->dst = (__force __be32)ipv6_addr_hash(&iph->daddr);
 		nhoff += sizeof(struct ipv6hdr);
 		break;
 	}

@@ -30,7 +30,6 @@
 #include <linux/delay.h>
 #include <linux/input/as5011.h>
 #include <linux/slab.h>
-#include <linux/module.h>
 
 #define DRIVER_DESC "Driver for Austria Microsystems AS5011 joystick"
 #define MODULE_DEVICE_ALIAS "as5011"
@@ -231,6 +230,7 @@ static int __devinit as5011_probe(struct i2c_client *client,
 	}
 
 	if (!i2c_check_functionality(client->adapter,
+				     I2C_FUNC_NOSTART |
 				     I2C_FUNC_PROTOCOL_MANGLING)) {
 		dev_err(&client->dev,
 			"need i2c bus that supports protocol mangling\n");
@@ -355,4 +355,14 @@ static struct i2c_driver as5011_driver = {
 	.id_table	= as5011_id,
 };
 
-module_i2c_driver(as5011_driver);
+static int __init as5011_init(void)
+{
+	return i2c_add_driver(&as5011_driver);
+}
+module_init(as5011_init);
+
+static void __exit as5011_exit(void)
+{
+	i2c_del_driver(&as5011_driver);
+}
+module_exit(as5011_exit);

@@ -13,6 +13,9 @@
 
 #ifdef __KERNEL__
 
+#include <linux/netpoll.h>
+#include <net/sch_generic.h>
+
 struct team_pcpu_stats {
 	u64			rx_packets;
 	u64			rx_bytes;
@@ -33,6 +36,24 @@ struct team_port {
 	struct team *team;
 	int index;
 
+	bool linkup; /* either state.linkup or user.linkup */
+
+	struct {
+		bool linkup;
+		u32 speed;
+		u8 duplex;
+	} state;
+
+	/* Values set by userspace */
+	struct {
+		bool linkup;
+		bool linkup_enabled;
+	} user;
+
+	/* Custom gennetlink interface related flags */
+	bool changed;
+	bool removed;
+
 	/*
 	 * A place for storing original values of the device before it
 	 * become a port.
@@ -42,16 +63,38 @@ struct team_port {
 		unsigned int mtu;
 	} orig;
 
-	bool linkup;
-	u32 speed;
-	u8 duplex;
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	struct netpoll *np;
+#endif
 
-	/* Custom gennetlink interface related flags */
-	bool changed;
-	bool removed;
-
-	struct rcu_head rcu;
+	long mode_priv[0];
 };
+
+static inline bool team_port_enabled(struct team_port *port)
+{
+	return port->index != -1;
+}
+
+static inline bool team_port_txable(struct team_port *port)
+{
+	return port->linkup && team_port_enabled(port);
+}
+
+#ifdef CONFIG_NET_POLL_CONTROLLER
+static inline void team_netpoll_send_skb(struct team_port *port,
+					 struct sk_buff *skb)
+{
+	struct netpoll *np = port->np;
+
+	if (np)
+		netpoll_send_skb(np, skb);
+}
+#else
+static inline void team_netpoll_send_skb(struct team_port *port,
+					 struct sk_buff *skb)
+{
+}
+#endif
 
 struct team_mode_ops {
 	int (*init)(struct team *team);
@@ -87,6 +130,7 @@ struct team_mode {
 	const char *kind;
 	struct module *owner;
 	size_t priv_size;
+	size_t port_priv_size;
 	const struct team_mode_ops *ops;
 };
 
@@ -100,7 +144,7 @@ struct team {
 	struct net_device *dev; /* associated netdevice */
 	struct team_pcpu_stats __percpu *pcpu_stats;
 
-	struct mutex lock; /* used for overall locking, e.g. port lists write */
+	spinlock_t lock; /* used for overall locking, e.g. port lists write */
 
 	/*
 	 * port lists with port count
@@ -115,6 +159,21 @@ struct team {
 	struct team_mode_ops ops;
 	long mode_priv[TEAM_MODE_PRIV_LONGS];
 };
+
+static inline int team_dev_queue_xmit(struct team *team, struct team_port *port,
+				      struct sk_buff *skb)
+{
+	BUILD_BUG_ON(sizeof(skb->queue_mapping) !=
+		     sizeof(qdisc_skb_cb(skb)->slave_dev_queue_mapping));
+	skb_set_queue_mapping(skb, qdisc_skb_cb(skb)->slave_dev_queue_mapping);
+
+	skb->dev = port->dev;
+	if (unlikely(netpoll_tx_running(team->dev))) {
+		team_netpoll_send_skb(port, skb);
+		return 0;
+	}
+	return dev_queue_xmit(skb);
+}
 
 static inline struct hlist_head *team_port_index_hash(struct team *team,
 						      int port_index)
@@ -148,14 +207,17 @@ static inline struct team_port *team_get_port_by_index_rcu(struct team *team,
 }
 
 extern int team_port_set_team_mac(struct team_port *port);
-extern int team_options_register(struct team *team,
-				 const struct team_option *option,
-				 size_t option_count);
+extern void team_options_register(struct team *team,
+				  struct team_option *option,
+				  size_t option_count);
 extern void team_options_unregister(struct team *team,
-				    const struct team_option *option,
+				    struct team_option *option,
 				    size_t option_count);
 extern int team_mode_register(struct team_mode *mode);
 extern int team_mode_unregister(struct team_mode *mode);
+
+#define TEAM_DEFAULT_NUM_TX_QUEUES 16
+#define TEAM_DEFAULT_NUM_RX_QUEUES 16
 
 #endif /* __KERNEL__ */
 

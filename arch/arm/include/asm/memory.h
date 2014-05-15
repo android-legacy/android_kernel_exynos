@@ -16,9 +16,9 @@
 #include <linux/compiler.h>
 #include <linux/const.h>
 #include <linux/types.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 
-#ifdef CONFIG_NEED_MACH_MEMORY_H
+#ifndef CONFIG_NO_MACH_MEMORY_H
 #include <mach/memory.h>
 #endif
 
@@ -98,23 +98,19 @@
 #define TASK_UNMAPPED_BASE	UL(0x00000000)
 #endif
 
-#ifndef PHYS_OFFSET
-#define PHYS_OFFSET 		UL(CONFIG_DRAM_BASE)
-#endif
-
 #ifndef END_MEM
 #define END_MEM     		(UL(CONFIG_DRAM_BASE) + CONFIG_DRAM_SIZE)
 #endif
 
 #ifndef PAGE_OFFSET
-#define PAGE_OFFSET		(PHYS_OFFSET)
+#define PAGE_OFFSET		PLAT_PHYS_OFFSET
 #endif
 
 /*
  * The module can be at any place in ram in nommu mode.
  */
 #define MODULES_END		(END_MEM)
-#define MODULES_VADDR		(PHYS_OFFSET)
+#define MODULES_VADDR		PAGE_OFFSET
 
 #define XIP_VIRT_ADDR(physaddr)  (physaddr)
 
@@ -141,6 +137,30 @@
 #define page_to_phys(page)	(__pfn_to_phys(page_to_pfn(page)))
 #define phys_to_page(phys)	(pfn_to_page(__phys_to_pfn(phys)))
 
+/*
+ * Minimum guaranted alignment in pgd_alloc().  The page table pointers passed
+ * around in head.S and proc-*.S are shifted by this amount, in order to
+ * leave spare high bits for systems with physical address extension.  This
+ * does not fully accomodate the 40-bit addressing capability of ARM LPAE, but
+ * gives us about 38-bits or so.
+ */
+#ifdef CONFIG_ARM_LPAE
+#define ARCH_PGD_SHIFT		L1_CACHE_SHIFT
+#else
+#define ARCH_PGD_SHIFT		0
+#endif
+#define ARCH_PGD_MASK		((1 << ARCH_PGD_SHIFT) - 1)
+
+/*
+ * PLAT_PHYS_OFFSET is the offset (from zero) of the start of physical
+ * memory.  This is used for XIP and NoMMU kernels, or by kernels which
+ * have their own mach/memory.h.  Assembly code must always use
+ * PLAT_PHYS_OFFSET and not PHYS_OFFSET.
+ */
+#ifndef PLAT_PHYS_OFFSET
+#define PLAT_PHYS_OFFSET	UL(CONFIG_PHYS_OFFSET)
+#endif
+
 #ifndef __ASSEMBLY__
 
 /*
@@ -156,6 +176,7 @@
  * so that all we need to do is modify the 8-bit constant field.
  */
 #define __PV_BITS_31_24	0x81000000
+#define __PV_BITS_23_16	0x00810000
 
 extern unsigned long __pv_phys_offset;
 #define PHYS_OFFSET __pv_phys_offset
@@ -169,30 +190,40 @@ extern unsigned long __pv_phys_offset;
 	: "=r" (to)					\
 	: "r" (from), "I" (type))
 
-static inline unsigned long __virt_to_phys(unsigned long x)
+static inline phys_addr_t __virt_to_phys(unsigned long x)
 {
 	unsigned long t;
 	__pv_stub(x, t, "add", __PV_BITS_31_24);
+#ifdef CONFIG_ARM_PATCH_PHYS_VIRT_16BIT
+	__pv_stub(t, t, "add", __PV_BITS_23_16);
+#endif
 	return t;
 }
 
-static inline unsigned long __phys_to_virt(unsigned long x)
+static inline unsigned long __phys_to_virt(phys_addr_t x)
 {
 	unsigned long t;
 	__pv_stub(x, t, "sub", __PV_BITS_31_24);
+#ifdef CONFIG_ARM_PATCH_PHYS_VIRT_16BIT
+	__pv_stub(t, t, "sub", __PV_BITS_23_16);
+#endif
 	return t;
 }
-#else
-#define __virt_to_phys(x)	((x) - PAGE_OFFSET + PHYS_OFFSET)
-#define __phys_to_virt(x)	((x) - PHYS_OFFSET + PAGE_OFFSET)
-#endif
-#endif
 
-#ifndef PHYS_OFFSET
-#ifdef PLAT_PHYS_OFFSET
-#define PHYS_OFFSET	PLAT_PHYS_OFFSET
 #else
-#define PHYS_OFFSET	UL(CONFIG_PHYS_OFFSET)
+
+#define PHYS_OFFSET	PLAT_PHYS_OFFSET
+
+static inline phys_addr_t __virt_to_phys(unsigned long x)
+{
+	return (phys_addr_t)x - PAGE_OFFSET + PHYS_OFFSET;
+}
+
+static inline unsigned long __phys_to_virt(phys_addr_t x)
+{
+	return x - PHYS_OFFSET + PAGE_OFFSET;
+}
+
 #endif
 #endif
 
@@ -219,14 +250,15 @@ static inline phys_addr_t virt_to_phys(const volatile void *x)
 
 static inline void *phys_to_virt(phys_addr_t x)
 {
-	return (void *)(__phys_to_virt((unsigned long)(x)));
+	return (void *)__phys_to_virt(x);
 }
 
 /*
  * Drivers should NOT use these either.
  */
 #define __pa(x)			__virt_to_phys((unsigned long)(x))
-#define __va(x)			((void *)__phys_to_virt((unsigned long)(x)))
+#define __va(x)			((void *)__phys_to_virt((phys_addr_t)(x)))
+#define __pa_symbol(x)		__pa(RELOC_HIDE((unsigned long)(x), 0))
 #define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
 
 /*
@@ -270,7 +302,8 @@ static inline __deprecated void *bus_to_virt(unsigned long x)
 #define ARCH_PFN_OFFSET		PHYS_PFN_OFFSET
 
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
-#define virt_addr_valid(kaddr)	((unsigned long)(kaddr) >= PAGE_OFFSET && (unsigned long)(kaddr) < (unsigned long)high_memory)
+#define virt_addr_valid(kaddr)	(((unsigned long)(kaddr) >= PAGE_OFFSET && (unsigned long)(kaddr) < (unsigned long)high_memory) \
+					&& pfn_valid(__pa(kaddr) >> PAGE_SHIFT) )
 
 /*
  * Optional coherency support.  Currently used only by selected

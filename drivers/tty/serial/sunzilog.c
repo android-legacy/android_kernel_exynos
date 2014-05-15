@@ -44,8 +44,8 @@
 #endif
 
 #include <linux/serial_core.h>
-#include <linux/sunserialcore.h>
 
+#include "suncore.h"
 #include "sunzilog.h"
 
 /* On 32-bit sparcs we need to delay after register accesses
@@ -1202,20 +1202,16 @@ sunzilog_console_write(struct console *con, const char *s, unsigned int count)
 	unsigned long flags;
 	int locked = 1;
 
-	local_irq_save(flags);
-	if (up->port.sysrq) {
-		locked = 0;
-	} else if (oops_in_progress) {
-		locked = spin_trylock(&up->port.lock);
-	} else
-		spin_lock(&up->port.lock);
+	if (up->port.sysrq || oops_in_progress)
+		locked = spin_trylock_irqsave(&up->port.lock, flags);
+	else
+		spin_lock_irqsave(&up->port.lock, flags);
 
 	uart_console_write(&up->port, s, count, sunzilog_putchar);
 	udelay(2);
 
 	if (locked)
-		spin_unlock(&up->port.lock);
-	local_irq_restore(flags);
+		spin_unlock_irqrestore(&up->port.lock, flags);
 }
 
 static int __init sunzilog_console_setup(struct console *con, char *options)
@@ -1398,7 +1394,7 @@ static void __devinit sunzilog_init_hw(struct uart_sunzilog_port *up)
 #endif
 }
 
-static int zilog_irq;
+static int zilog_irq = -1;
 
 static int __devinit zs_probe(struct platform_device *op)
 {
@@ -1426,7 +1422,7 @@ static int __devinit zs_probe(struct platform_device *op)
 
 	rp = sunzilog_chip_regs[inst];
 
-	if (!zilog_irq)
+	if (zilog_irq == -1)
 		zilog_irq = op->archdata.irqs[0];
 
 	up = &sunzilog_port_table[inst * 2];
@@ -1581,7 +1577,7 @@ static int __init sunzilog_init(void)
 	if (err)
 		goto out_unregister_uart;
 
-	if (zilog_irq) {
+	if (zilog_irq != -1) {
 		struct uart_sunzilog_port *up = sunzilog_irq_chain;
 		err = request_irq(zilog_irq, sunzilog_interrupt, IRQF_SHARED,
 				  "zs", sunzilog_irq_chain);
@@ -1622,7 +1618,7 @@ static void __exit sunzilog_exit(void)
 {
 	platform_driver_unregister(&zs_driver);
 
-	if (zilog_irq) {
+	if (zilog_irq != -1) {
 		struct uart_sunzilog_port *up = sunzilog_irq_chain;
 
 		/* Disable Interrupts */
@@ -1638,7 +1634,7 @@ static void __exit sunzilog_exit(void)
 		}
 
 		free_irq(zilog_irq, sunzilog_irq_chain);
-		zilog_irq = 0;
+		zilog_irq = -1;
 	}
 
 	if (sunzilog_reg.nr) {

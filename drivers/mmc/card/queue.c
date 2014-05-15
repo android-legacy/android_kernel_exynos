@@ -15,6 +15,7 @@
 #include <linux/freezer.h>
 #include <linux/kthread.h>
 #include <linux/scatterlist.h>
+#include <linux/dma-mapping.h>
 
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
@@ -96,7 +97,7 @@ static int mmc_queue_thread(void *d)
  * on any queue on this host, and attempt to issue it.  This may
  * not be the queue we were asked to process.
  */
-static void mmc_request(struct request_queue *q)
+static void mmc_request_fn(struct request_queue *q)
 {
 	struct mmc_queue *mq = q->queuedata;
 	struct request *req;
@@ -168,15 +169,17 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 	struct mmc_queue_req *mqrq_prev = &mq->mqrq[1];
 
 	if (mmc_dev(host)->dma_mask && *mmc_dev(host)->dma_mask)
-		limit = *mmc_dev(host)->dma_mask;
+		limit = (u64)dma_max_pfn(mmc_dev(host)) << PAGE_SHIFT;
 
 	mq->card = card;
-	mq->queue = blk_init_queue(mmc_request, lock);
+	mq->queue = blk_init_queue(mmc_request_fn, lock);
 	if (!mq->queue)
 		return -ENOMEM;
 
 	memset(&mq->mqrq_cur, 0, sizeof(mq->mqrq_cur));
 	memset(&mq->mqrq_prev, 0, sizeof(mq->mqrq_prev));
+	INIT_LIST_HEAD(&mqrq_cur->packed_list);
+	INIT_LIST_HEAD(&mqrq_prev->packed_list);
 	mq->mqrq_cur = mqrq_cur;
 	mq->mqrq_prev = mqrq_prev;
 	mq->queue->queuedata = mq;
@@ -377,6 +380,39 @@ void mmc_queue_resume(struct mmc_queue *mq)
 	}
 }
 
+static unsigned int mmc_queue_packed_map_sg(struct mmc_queue *mq,
+				struct mmc_queue_req *mqrq,
+				struct scatterlist *sg)
+{
+	struct scatterlist *__sg;
+	unsigned int sg_len = 0;
+	struct request *req;
+	enum mmc_packed_cmd cmd;
+
+	cmd = mqrq->packed_cmd;
+
+	if (cmd == MMC_PACKED_WR_HDR || cmd == MMC_PACKED_WRITE) {
+		__sg = sg;
+		sg_set_buf(__sg, mqrq->packed_cmd_hdr,
+				sizeof(mqrq->packed_cmd_hdr));
+		sg_len++;
+		if (cmd == MMC_PACKED_WR_HDR) {
+			sg_mark_end(__sg);
+			return sg_len;
+		}
+		__sg->page_link &= ~0x02;
+	}
+
+	__sg = sg + sg_len;
+	list_for_each_entry(req, &mqrq->packed_list, queuelist) {
+		sg_len += blk_rq_map_sg(mq->queue, req, __sg);
+		__sg = sg + (sg_len - 1);
+		(__sg++)->page_link &= ~0x02;
+	}
+	sg_mark_end(sg + (sg_len - 1));
+	return sg_len;
+}
+
 /*
  * Prepare the sg list(s) to be handed of to the host driver
  */
@@ -387,12 +423,19 @@ unsigned int mmc_queue_map_sg(struct mmc_queue *mq, struct mmc_queue_req *mqrq)
 	struct scatterlist *sg;
 	int i;
 
-	if (!mqrq->bounce_buf)
-		return blk_rq_map_sg(mq->queue, mqrq->req, mqrq->sg);
+	if (!mqrq->bounce_buf) {
+		if (!list_empty(&mqrq->packed_list))
+			return mmc_queue_packed_map_sg(mq, mqrq, mqrq->sg);
+		else
+			return blk_rq_map_sg(mq->queue, mqrq->req, mqrq->sg);
+	}
 
 	BUG_ON(!mqrq->bounce_sg);
 
-	sg_len = blk_rq_map_sg(mq->queue, mqrq->req, mqrq->bounce_sg);
+	if (!list_empty(&mqrq->packed_list))
+		sg_len = mmc_queue_packed_map_sg(mq, mqrq, mqrq->bounce_sg);
+	else
+		sg_len = blk_rq_map_sg(mq->queue, mqrq->req, mqrq->bounce_sg);
 
 	mqrq->bounce_sg_len = sg_len;
 

@@ -18,6 +18,7 @@
 
 #include <linux/kmemcheck.h>
 #include <linux/list.h>
+#include <linux/module.h>
 #include <linux/timer.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
@@ -175,11 +176,11 @@ static inline int inet_twsk_del_dead_node(struct inet_timewait_sock *tw)
 #define inet_twsk_for_each(tw, node, head) \
 	hlist_nulls_for_each_entry(tw, node, head, tw_node)
 
-#define inet_twsk_for_each_inmate(tw, node, jail) \
-	hlist_for_each_entry(tw, node, jail, tw_death_node)
+#define inet_twsk_for_each_inmate(tw, jail) \
+	hlist_for_each_entry(tw, jail, tw_death_node)
 
-#define inet_twsk_for_each_inmate_safe(tw, node, safe, jail) \
-	hlist_for_each_entry_safe(tw, node, safe, jail, tw_death_node)
+#define inet_twsk_for_each_inmate_safe(tw, safe, jail) \
+	hlist_for_each_entry_safe(tw, safe, jail, tw_death_node)
 
 static inline struct inet_timewait_sock *inet_twsk(const struct sock *sk)
 {
@@ -218,12 +219,20 @@ extern void inet_twsk_purge(struct inet_hashinfo *hashinfo,
 static inline
 struct net *twsk_net(const struct inet_timewait_sock *twsk)
 {
-	return read_pnet(&twsk->tw_net);
+#ifdef CONFIG_NET_NS
+	return rcu_dereference_raw(twsk->tw_net); /* protected by locking, */
+						  /* reference counting, */
+						  /* initialization, or RCU. */
+#else
+	return &init_net;
+#endif
 }
 
 static inline
 void twsk_net_set(struct inet_timewait_sock *twsk, struct net *net)
 {
-	write_pnet(&twsk->tw_net, net);
+#ifdef CONFIG_NET_NS
+	rcu_assign_pointer(twsk->tw_net, net);
+#endif
 }
 #endif	/* _INET_TIMEWAIT_SOCK_ */

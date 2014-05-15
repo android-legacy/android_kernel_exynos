@@ -3,14 +3,14 @@
  * Contents are wifi-specific, used by any kernel or app-level
  * software that might want wifi things as it grows.
  *
- * Copyright (C) 1999-2013, Broadcom Corporation
- * 
+ * Copyright (C) 1999-2012, Broadcom Corporation
+ *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -18,7 +18,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -27,10 +27,10 @@
 
 #include <bcm_cfg.h>
 #include <typedefs.h>
-#include <bcmutils.h>
 
 #ifdef BCMDRIVER
 #include <osl.h>
+#include <bcmutils.h>
 #define strtoul(nptr, endptr, base) bcm_strtoul((nptr), (endptr), (base))
 #define tolower(c) (bcm_isupper((c)) ? ((c) + 'a' - 'A') : (c))
 #else
@@ -50,7 +50,7 @@
 #endif
 
 #if defined(WIN32) && (defined(BCMDLL) || defined(WLMDLL))
-#include <bcmstdlib.h> 	/* For wl/exe/GNUmakefile.brcm_wlu and GNUmakefile.wlm_dll */
+#include <bcmstdlib.h>	/* For wl/exe/GNUmakefile.brcm_wlu and GNUmakefile.wlm_dll */
 #endif
 
 #ifndef D11AC_IOTYPES
@@ -309,7 +309,7 @@ wf_chspec_ctlchspec(chanspec_t chspec)
  * <channel>:
  *	primary channel of 40MHz, channel <= 14 is 2GHz, otherwise 5GHz
  * <ctl-sideband>:
- * 	"U" for upper, "L" for lower (or lower case "u" "l")
+ *	"U" for upper, "L" for lower (or lower case "u" "l")
  *
  * 5 GHz Examples:
  *      Chanspec        BW        Center Ch  Channel Range  Primary Ch
@@ -911,12 +911,6 @@ wf_chspec_valid(chanspec_t chanspec)
 				}
 
 				if (i == num_ch) {
-					/* check for channel 165 which is not the side band
-					 * of 40MHz 5G channel
-					 */
-					if (chspec_ch == 165)
-						i = 0;
-
 					/* check for legacy JP channels on failure */
 					if (chspec_ch == 34 || chspec_ch == 38 ||
 					    chspec_ch == 42 || chspec_ch == 46)
@@ -1003,9 +997,7 @@ wf_chspec_ctlchspec(chanspec_t chspec)
 	return ctl_chspec;
 }
 
-/* return chanspec given control channel and bandwidth
- * return 0 on error
- */
+
 uint16
 wf_channel2chspec(uint ctl_ch, uint bw)
 {
@@ -1047,7 +1039,7 @@ wf_channel2chspec(uint ctl_ch, uint bw)
 		}
 	}
 
-	/* check for no matching sb/center */
+
 	if (sb < 0) {
 		return 0;
 	}
@@ -1055,7 +1047,7 @@ wf_channel2chspec(uint ctl_ch, uint bw)
 	return chspec;
 }
 
-#endif /* D11AC_IOTYPES */
+#endif
 
 /*
  * This function returns the chanspec for the primary 40MHz of an 80MHz channel.
@@ -1183,107 +1175,4 @@ wf_channel2mhz(uint ch, uint start_factor)
 		freq = ch * 5 + start_factor / 2;
 
 	return freq;
-}
-
-/* These chan_info[] & lookup routines replicate those from wlc_phy.c because of BMAC split */
-static const struct chan_info {
-	uint16	chan;	/* channel number */
-	uint16	freq;	/* in MHz */
-} chan_info[] = {
-	/* 11b/11g */
-/* 0 */		{1,	2412},
-/* 1 */		{2,	2417},
-/* 2 */		{3,	2422},
-/* 3 */		{4,	2427},
-/* 4 */		{5,	2432},
-/* 5 */		{6,	2437},
-/* 6 */		{7,	2442},
-/* 7 */		{8,	2447},
-/* 8 */		{9,	2452},
-/* 9 */		{10,	2457},
-/* 10 */	{11,	2462},
-/* 11 */	{12,	2467},
-/* 12 */	{13,	2472},
-/* 13 */	{14,	2484},
-
-#ifdef BAND5G
-/* 11a japan high */
-/* 14 */	{34,	5170},
-/* 15 */	{38,	5190},
-/* 16 */	{42,	5210},
-/* 17 */	{46,	5230},
-
-/* 11a usa low */
-/* 18 */	{36,	5180},
-/* 19 */	{40,	5200},
-/* 20 */	{44,	5220},
-/* 21 */	{48,	5240},
-/* 22 */	{52,	5260},
-/* 23 */	{56,	5280},
-/* 24 */	{60,	5300},
-/* 25 */	{64,	5320},
-
-/* 11a Europe */
-/* 26 */	{100,	5500},
-/* 27 */	{104,	5520},
-/* 28 */	{108,	5540},
-/* 29 */	{112,	5560},
-/* 30 */	{116,	5580},
-/* 31 */	{120,	5600},
-/* 32 */	{124,	5620},
-/* 33 */	{128,	5640},
-/* 34 */	{132,	5660},
-/* 35 */	{136,	5680},
-/* 36 */	{140,	5700},
-
-/* 11a usa high, ref5 only */
-/* 37 */	{149,	5745},
-/* 38 */	{153,	5765},
-/* 39 */	{157,	5785},
-/* 40 */	{161,	5805},
-/* 41 */	{165,	5825},
-
-/* 11a japan */
-/* 42 */	{184,	4920},
-/* 43 */	{188,	4940},
-/* 44 */	{192,	4960},
-/* 45 */	{196,	4980},
-/* 46 */	{200,	5000},
-/* 47 */	{204,	5020},
-/* 48 */	{208,	5040},
-/* 49 */	{212,	5060},
-/* 50 */	{216,	5080}
-#endif /* BAND5G */
-};
-
-/*
- * Converts channel frequency to channel number.
- * Returns 0 if the frequency does not match any channel definition.
- */
-uint
-wf_freq2channel(uint freq)
-{
-	uint i;
-
-	for (i = 0; i < ARRAYSIZE(chan_info); i++) {
-		if (chan_info[i].freq == freq)
-			return (chan_info[i].chan);
-	}
-	return (0);
-}
-
-/*
- * Converts channel number to channel frequency.
- * Returns 0 if the channel is out of range.
- * Also used by some code in wlc_iw.c
- */
-uint
-wf_channel2freq(uint channel)
-{
-	uint i;
-
-	for (i = 0; i < ARRAYSIZE(chan_info); i++)
-		if (chan_info[i].chan == channel)
-			return (chan_info[i].freq);
-	return (0);
 }

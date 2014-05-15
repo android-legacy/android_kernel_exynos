@@ -48,7 +48,8 @@
 #endif
 
 #include <linux/serial_core.h>
-#include <linux/sunserialcore.h>
+
+#include "suncore.h"
 
 /* We are on a NS PC87303 clocked with 24.0 MHz, which results
  * in a UART clock of 1.8462 MHz.
@@ -1295,13 +1296,10 @@ static void sunsu_console_write(struct console *co, const char *s,
 	unsigned int ier;
 	int locked = 1;
 
-	local_irq_save(flags);
-	if (up->port.sysrq) {
-		locked = 0;
-	} else if (oops_in_progress) {
-		locked = spin_trylock(&up->port.lock);
-	} else
-		spin_lock(&up->port.lock);
+	if (up->port.sysrq || oops_in_progress)
+		locked = spin_trylock_irqsave(&up->port.lock, flags);
+	else
+		spin_lock_irqsave(&up->port.lock, flags);
 
 	/*
 	 *	First save the UER then disable the interrupts
@@ -1319,8 +1317,7 @@ static void sunsu_console_write(struct console *co, const char *s,
 	serial_out(up, UART_IER, ier);
 
 	if (locked)
-		spin_unlock(&up->port.lock);
-	local_irq_restore(flags);
+		spin_unlock_irqrestore(&up->port.lock, flags);
 }
 
 /*

@@ -40,7 +40,7 @@ struct bitmap_port {
 /* Base variant */
 
 static int
-bitmap_port_test(struct ip_set *set, void *value, u32 timeout, u32 flags)
+bitmap_port_test(struct ip_set *set, void *value, u32 timeout)
 {
 	const struct bitmap_port *map = set->data;
 	u16 id = *(u16 *)value;
@@ -49,7 +49,7 @@ bitmap_port_test(struct ip_set *set, void *value, u32 timeout, u32 flags)
 }
 
 static int
-bitmap_port_add(struct ip_set *set, void *value, u32 timeout, u32 flags)
+bitmap_port_add(struct ip_set *set, void *value, u32 timeout)
 {
 	struct bitmap_port *map = set->data;
 	u16 id = *(u16 *)value;
@@ -61,7 +61,7 @@ bitmap_port_add(struct ip_set *set, void *value, u32 timeout, u32 flags)
 }
 
 static int
-bitmap_port_del(struct ip_set *set, void *value, u32 timeout, u32 flags)
+bitmap_port_del(struct ip_set *set, void *value, u32 timeout)
 {
 	struct bitmap_port *map = set->data;
 	u16 id = *(u16 *)value;
@@ -96,8 +96,9 @@ bitmap_port_list(const struct ip_set *set,
 			} else
 				goto nla_put_failure;
 		}
-		NLA_PUT_NET16(skb, IPSET_ATTR_PORT,
-			      htons(map->first_port + id));
+		if (nla_put_net16(skb, IPSET_ATTR_PORT,
+				  htons(map->first_port + id)))
+			goto nla_put_failure;
 		ipset_nest_end(skb, nested);
 	}
 	ipset_nest_end(skb, atd);
@@ -119,7 +120,7 @@ nla_put_failure:
 /* Timeout variant */
 
 static int
-bitmap_port_ttest(struct ip_set *set, void *value, u32 timeout, u32 flags)
+bitmap_port_ttest(struct ip_set *set, void *value, u32 timeout)
 {
 	const struct bitmap_port *map = set->data;
 	const unsigned long *members = map->members;
@@ -129,13 +130,13 @@ bitmap_port_ttest(struct ip_set *set, void *value, u32 timeout, u32 flags)
 }
 
 static int
-bitmap_port_tadd(struct ip_set *set, void *value, u32 timeout, u32 flags)
+bitmap_port_tadd(struct ip_set *set, void *value, u32 timeout)
 {
 	struct bitmap_port *map = set->data;
 	unsigned long *members = map->members;
 	u16 id = *(u16 *)value;
 
-	if (ip_set_timeout_test(members[id]) && !(flags & IPSET_FLAG_EXIST))
+	if (ip_set_timeout_test(members[id]))
 		return -IPSET_ERR_EXIST;
 
 	members[id] = ip_set_timeout_set(timeout);
@@ -144,7 +145,7 @@ bitmap_port_tadd(struct ip_set *set, void *value, u32 timeout, u32 flags)
 }
 
 static int
-bitmap_port_tdel(struct ip_set *set, void *value, u32 timeout, u32 flags)
+bitmap_port_tdel(struct ip_set *set, void *value, u32 timeout)
 {
 	struct bitmap_port *map = set->data;
 	unsigned long *members = map->members;
@@ -183,10 +184,11 @@ bitmap_port_tlist(const struct ip_set *set,
 			} else
 				goto nla_put_failure;
 		}
-		NLA_PUT_NET16(skb, IPSET_ATTR_PORT,
-			      htons(map->first_port + id));
-		NLA_PUT_NET32(skb, IPSET_ATTR_TIMEOUT,
-			      htonl(ip_set_timeout_get(members[id])));
+		if (nla_put_net16(skb, IPSET_ATTR_PORT,
+				  htons(map->first_port + id)) ||
+		    nla_put_net32(skb, IPSET_ATTR_TIMEOUT,
+				  htonl(ip_set_timeout_get(members[id]))))
+			goto nla_put_failure;
 		ipset_nest_end(skb, nested);
 	}
 	ipset_nest_end(skb, adt);
@@ -208,16 +210,14 @@ nla_put_failure:
 
 static int
 bitmap_port_kadt(struct ip_set *set, const struct sk_buff *skb,
-		 const struct xt_action_param *par,
-		 enum ipset_adt adt, const struct ip_set_adt_opt *opt)
+		 enum ipset_adt adt, u8 pf, u8 dim, u8 flags)
 {
 	struct bitmap_port *map = set->data;
 	ipset_adtfn adtfn = set->variant->adt[adt];
 	__be16 __port;
 	u16 port = 0;
 
-	if (!ip_set_get_ip_port(skb, opt->family,
-				opt->flags & IPSET_DIM_ONE_SRC, &__port))
+	if (!ip_set_get_ip_port(skb, pf, flags & IPSET_DIM_ONE_SRC, &__port))
 		return -EINVAL;
 
 	port = ntohs(__port);
@@ -227,12 +227,12 @@ bitmap_port_kadt(struct ip_set *set, const struct sk_buff *skb,
 
 	port -= map->first_port;
 
-	return adtfn(set, &port, opt_timeout(opt, map), opt->cmdflags);
+	return adtfn(set, &port, map->timeout);
 }
 
 static int
 bitmap_port_uadt(struct ip_set *set, struct nlattr *tb[],
-		 enum ipset_adt adt, u32 *lineno, u32 flags, bool retried)
+		 enum ipset_adt adt, u32 *lineno, u32 flags)
 {
 	struct bitmap_port *map = set->data;
 	ipset_adtfn adtfn = set->variant->adt[adt];
@@ -261,7 +261,7 @@ bitmap_port_uadt(struct ip_set *set, struct nlattr *tb[],
 
 	if (adt == IPSET_TEST) {
 		id = port - map->first_port;
-		return adtfn(set, &id, timeout, flags);
+		return adtfn(set, &id, timeout);
 	}
 
 	if (tb[IPSET_ATTR_PORT_TO]) {
@@ -279,7 +279,7 @@ bitmap_port_uadt(struct ip_set *set, struct nlattr *tb[],
 
 	for (; port <= port_to; port++) {
 		id = port - map->first_port;
-		ret = adtfn(set, &id, timeout, flags);
+		ret = adtfn(set, &id, timeout);
 
 		if (ret && !ip_set_eexist(ret, flags))
 			return ret;
@@ -320,13 +320,14 @@ bitmap_port_head(struct ip_set *set, struct sk_buff *skb)
 	nested = ipset_nest_start(skb, IPSET_ATTR_DATA);
 	if (!nested)
 		goto nla_put_failure;
-	NLA_PUT_NET16(skb, IPSET_ATTR_PORT, htons(map->first_port));
-	NLA_PUT_NET16(skb, IPSET_ATTR_PORT_TO, htons(map->last_port));
-	NLA_PUT_NET32(skb, IPSET_ATTR_REFERENCES, htonl(set->ref - 1));
-	NLA_PUT_NET32(skb, IPSET_ATTR_MEMSIZE,
-		      htonl(sizeof(*map) + map->memsize));
-	if (with_timeout(map->timeout))
-		NLA_PUT_NET32(skb, IPSET_ATTR_TIMEOUT, htonl(map->timeout));
+	if (nla_put_net16(skb, IPSET_ATTR_PORT, htons(map->first_port)) ||
+	    nla_put_net16(skb, IPSET_ATTR_PORT_TO, htons(map->last_port)) ||
+	    nla_put_net32(skb, IPSET_ATTR_REFERENCES, htonl(set->ref - 1)) ||
+	    nla_put_net32(skb, IPSET_ATTR_MEMSIZE,
+			  htonl(sizeof(*map) + map->memsize)) ||
+	    (with_timeout(map->timeout) &&
+	     nla_put_net32(skb, IPSET_ATTR_TIMEOUT, htonl(map->timeout))))
+		goto nla_put_failure;
 	ipset_nest_end(skb, nested);
 
 	return 0;
@@ -422,7 +423,7 @@ init_map_port(struct ip_set *set, struct bitmap_port *map,
 	map->timeout = IPSET_NO_TIMEOUT;
 
 	set->data = map;
-	set->family = NFPROTO_UNSPEC;
+	set->family = AF_UNSPEC;
 
 	return true;
 }
@@ -483,9 +484,8 @@ static struct ip_set_type bitmap_port_type = {
 	.protocol	= IPSET_PROTOCOL,
 	.features	= IPSET_TYPE_PORT,
 	.dimension	= IPSET_DIM_ONE,
-	.family		= NFPROTO_UNSPEC,
-	.revision_min	= 0,
-	.revision_max	= 0,
+	.family		= AF_UNSPEC,
+	.revision	= 0,
 	.create		= bitmap_port_create,
 	.create_policy	= {
 		[IPSET_ATTR_PORT]	= { .type = NLA_U16 },

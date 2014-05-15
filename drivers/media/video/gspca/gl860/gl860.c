@@ -18,9 +18,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include "gspca.h"
 #include "gl860.h"
 
@@ -337,6 +334,7 @@ static int sd_config(struct gspca_dev *gspca_dev,
 		return -1;
 
 	cam = &gspca_dev->cam;
+	gspca_dev->nbalt = 4;
 
 	switch (sd->sensor) {
 	case ID_MI1320:
@@ -559,8 +557,9 @@ int gl860_RTx(struct gspca_dev *gspca_dev,
 	}
 
 	if (r < 0)
-		pr_err("ctrl transfer failed %4d [p%02x r%d v%04x i%04x len%d]\n",
-		       r, pref, req, val, index, len);
+		err("ctrl transfer failed %4d "
+			"[p%02x r%d v%04x i%04x len%d]",
+			r, pref, req, val, index, len);
 	else if (len > 1 && r < len)
 		PDEBUG(D_ERR, "short ctrl transfer %d/%d", r, len);
 

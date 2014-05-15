@@ -13,10 +13,10 @@
 #ifndef __LINUX_POWER_SUPPLY_H__
 #define __LINUX_POWER_SUPPLY_H__
 
+#include <linux/device.h>
+#include <linux/wakelock.h>
 #include <linux/workqueue.h>
 #include <linux/leds.h>
-
-struct device;
 
 /*
  * All voltages, currents, charges, energies, time and temperatures in uV,
@@ -44,6 +44,7 @@ enum {
 	POWER_SUPPLY_CHARGE_TYPE_NONE,
 	POWER_SUPPLY_CHARGE_TYPE_TRICKLE,
 	POWER_SUPPLY_CHARGE_TYPE_FAST,
+	POWER_SUPPLY_CHARGE_TYPE_SLOW,
 };
 
 enum {
@@ -54,6 +55,9 @@ enum {
 	POWER_SUPPLY_HEALTH_OVERVOLTAGE,
 	POWER_SUPPLY_HEALTH_UNSPEC_FAILURE,
 	POWER_SUPPLY_HEALTH_COLD,
+	POWER_SUPPLY_HEALTH_UNDERVOLTAGE,
+	POWER_SUPPLY_HEALTH_WATCHDOG_TIMER_EXPIRE,
+	POWER_SUPPLY_HEALTH_SAFETY_TIMER_EXPIRE,
 };
 
 enum {
@@ -88,6 +92,7 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_AUTHENTIC,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
@@ -96,6 +101,7 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_VOLTAGE_AVG,
+	POWER_SUPPLY_PROP_VOLTAGE_OCV,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_CURRENT_AVG,
@@ -108,6 +114,12 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_AVG,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX,
+	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT,
+	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX,
 	POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN,
 	POWER_SUPPLY_PROP_ENERGY_EMPTY_DESIGN,
 	POWER_SUPPLY_PROP_ENERGY_FULL,
@@ -115,27 +127,31 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_ENERGY_NOW,
 	POWER_SUPPLY_PROP_ENERGY_AVG,
 	POWER_SUPPLY_PROP_CAPACITY, /* in percents! */
+#ifdef CONFIG_SLP
+	POWER_SUPPLY_PROP_CAPACITY_RAW,
+#endif
+	POWER_SUPPLY_PROP_CAPACITY_ALERT_MIN, /* in percents! */
+	POWER_SUPPLY_PROP_CAPACITY_ALERT_MAX, /* in percents! */
 	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
 	POWER_SUPPLY_PROP_TEMP,
+	POWER_SUPPLY_PROP_TEMP_ALERT_MIN,
+	POWER_SUPPLY_PROP_TEMP_ALERT_MAX,
 	POWER_SUPPLY_PROP_TEMP_AMBIENT,
+	POWER_SUPPLY_PROP_TEMP_AMBIENT_ALERT_MIN,
+	POWER_SUPPLY_PROP_TEMP_AMBIENT_ALERT_MAX,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_AVG,
 	POWER_SUPPLY_PROP_TYPE, /* use power_supply.type instead */
 	POWER_SUPPLY_PROP_SCOPE,
-	/* Local extensions */
-	POWER_SUPPLY_PROP_USB_HC,
-	POWER_SUPPLY_PROP_USB_OTG,
-	POWER_SUPPLY_PROP_CHARGE_ENABLED,
-	POWER_SUPPLY_PROP_USB_INPRIORITY,
-	POWER_SUPPLY_PROP_AUTO_CURRENT_LIMIT,
-	POWER_SUPPLY_PROP_REMOTE_TYPE,
-	POWER_SUPPLY_PROP_CHARGER_DETECTION,
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_PROP_MODEL_NAME,
 	POWER_SUPPLY_PROP_MANUFACTURER,
 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
+#if defined(CONFIG_MACH_GC1)
+	POWER_SUPPLY_PROP_RCOMP,
+#endif
 };
 
 enum power_supply_type {
@@ -147,7 +163,55 @@ enum power_supply_type {
 	POWER_SUPPLY_TYPE_USB_DCP,	/* Dedicated Charging Port */
 	POWER_SUPPLY_TYPE_USB_CDP,	/* Charging Downstream Port */
 	POWER_SUPPLY_TYPE_USB_ACA,	/* Accessory Charger Adapters */
+	POWER_SUPPLY_TYPE_DOCK,
+	POWER_SUPPLY_TYPE_MISC,
+	POWER_SUPPLY_TYPE_WIRELESS,
+	POWER_SUPPLY_TYPE_UARTOFF,
+	POWER_SUPPLY_TYPE_OTG,
 };
+
+enum {
+	POWER_SUPPLY_VBUS_UNKNOWN = 0,
+	POWER_SUPPLY_VBUS_UVLO,
+	POWER_SUPPLY_VBUS_WEAK,
+	POWER_SUPPLY_VBUS_OVLO,
+	POWER_SUPPLY_VBUS_GOOD,
+};
+
+/*
+ * EXTENDED_ONLINE_TYPE
+ * - support various charger cable type
+ * - set type from each accessory driver(muic, host, mhl, etc,,,)
+ *
+ * - type format
+ * | 31-24: RSVD | 23-16: MAIN TYPE | 15-8: SUB TYPE | 7-0: POWER TYPE |
+ */
+#define ONLINE_TYPE_RSVD_SHIFT	24
+#define ONLINE_TYPE_RSVD_MASK	(0xF << ONLINE_TYPE_RSVD_SHIFT)
+#define ONLINE_TYPE_MAIN_SHIFT	16
+#define ONLINE_TYPE_MAIN_MASK	(0xF << ONLINE_TYPE_MAIN_SHIFT)
+#define ONLINE_TYPE_SUB_SHIFT	8
+#define ONLINE_TYPE_SUB_MASK	(0xF << ONLINE_TYPE_SUB_SHIFT)
+#define ONLINE_TYPE_PWR_SHIFT	0
+#define ONLINE_TYPE_PWR_MASK	(0xF << ONLINE_TYPE_PWR_SHIFT)
+
+enum online_sub_type {
+	ONLINE_SUB_TYPE_UNKNOWN	= 0,
+	ONLINE_SUB_TYPE_MHL,
+	ONLINE_SUB_TYPE_AUDIO,
+	ONLINE_SUB_TYPE_DESK,
+	ONLINE_SUB_TYPE_SMART_NOTG,
+	ONLINE_SUB_TYPE_SMART_OTG,
+	ONLINE_SUB_TYPE_KBD,
+};
+
+enum online_power_type {
+	ONLINE_POWER_TYPE_UNKNOWN = 0,
+	ONLINE_POWER_TYPE_BATTERY,
+	ONLINE_POWER_TYPE_TA,
+	ONLINE_POWER_TYPE_USB,
+};
+/* EXTENDED_ONLINE_TYPE */
 
 union power_supply_propval {
 	int intval;
@@ -182,6 +246,7 @@ struct power_supply {
 	struct work_struct changed_work;
 	spinlock_t changed_lock;
 	bool changed;
+	struct wake_lock work_wake_lock;
 
 #ifdef CONFIG_LEDS_TRIGGERS
 	struct led_trigger *charging_full_trig;
@@ -216,10 +281,13 @@ struct power_supply_info {
 	int use_for_apm;
 };
 
-extern struct power_supply *power_supply_get_by_name(char *name);
+extern struct power_supply *power_supply_get_by_name(const char *name);
 extern void power_supply_changed(struct power_supply *psy);
 extern int power_supply_am_i_supplied(struct power_supply *psy);
 extern int power_supply_set_battery_charged(struct power_supply *psy);
+extern int power_supply_set_current_limit(struct power_supply *psy, int limit);
+extern int power_supply_set_online(struct power_supply *psy, bool enable);
+extern int power_supply_set_charge_type(struct power_supply *psy, int type);
 
 #if defined(CONFIG_POWER_SUPPLY) || defined(CONFIG_POWER_SUPPLY_MODULE)
 extern int power_supply_is_system_supplied(void);
@@ -245,6 +313,8 @@ static inline bool power_supply_is_amp_property(enum power_supply_property psp)
 	case POWER_SUPPLY_PROP_CHARGE_NOW:
 	case POWER_SUPPLY_PROP_CHARGE_AVG:
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 	case POWER_SUPPLY_PROP_CURRENT_AVG:
@@ -271,6 +341,9 @@ static inline bool power_supply_is_watt_property(enum power_supply_property psp)
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 	case POWER_SUPPLY_PROP_VOLTAGE_AVG:
+	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_POWER_NOW:
 		return 1;
 	default:

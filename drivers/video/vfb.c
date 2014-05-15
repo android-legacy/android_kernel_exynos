@@ -395,8 +395,8 @@ static int vfb_pan_display(struct fb_var_screeninfo *var,
 		    || var->xoffset)
 			return -EINVAL;
 	} else {
-		if (var->xoffset + info->var.xres > info->var.xres_virtual ||
-		    var->yoffset + info->var.yres > info->var.yres_virtual)
+		if (var->xoffset + var->xres > info->var.xres_virtual ||
+		    var->yoffset + var->yres > info->var.yres_virtual)
 			return -EINVAL;
 	}
 	info->var.xoffset = var->xoffset;
@@ -439,7 +439,6 @@ static int vfb_mmap(struct fb_info *info,
 			size = 0;
 	}
 
-	vma->vm_flags |= VM_RESERVED;	/* avoid to swap out this VMA */
 	return 0;
 
 }

@@ -14,6 +14,11 @@ extern bool pm_freezing;		/* PM freezing in effect */
 extern bool pm_nosig_freezing;		/* PM nosig freezing in effect */
 
 /*
+ * Timeout for stopping processes
+ */
+extern unsigned int freeze_timeout_msecs;
+
+/*
  * Check if a process has been frozen
  */
 static inline bool frozen(struct task_struct *p)
@@ -59,7 +64,10 @@ static inline bool try_to_freeze_nowarn(void)
  */
 static inline bool try_to_freeze_unsafe(void)
 {
-	might_sleep();
+/* This causes problems for ARM targets and is a known
+ * problem upstream.
+ *	might_sleep();
+ */
 	if (likely(!freezing(current)))
 		return false;
 	return __refrigerator(false);
@@ -137,6 +145,11 @@ static inline void freezer_count(void)
 static inline void freezer_count_unsafe(void)
 {
 	current->flags &= ~PF_FREEZER_SKIP;
+	/*
+	 * If freezing is in progress, the following paired with smp_mb()
+	 * in freezer_should_skip() ensures that either we see %true
+	 * freezing() or freezer_should_skip() sees !PF_FREEZER_SKIP.
+	 */
 	smp_mb();
 	try_to_freeze_unsafe();
 }
@@ -312,7 +325,6 @@ static inline int freeze_kernel_threads(void) { return -ENOSYS; }
 static inline void thaw_processes(void) {}
 static inline void thaw_kernel_threads(void) {}
 
-static inline bool try_to_freeze_nowarn(void) { return false; }
 static inline bool try_to_freeze(void) { return false; }
 
 static inline void freezer_do_not_count(void) {}

@@ -4,7 +4,7 @@
  * 	Evolved from s3c2443-ac97.c
  *
  * Copyright (c) 2010 Samsung Electronics Co. Ltd
- *	Author: Jaswinder Singh <jassisinghbrar@gmail.com>
+ * 	Author: Jaswinder Singh <jassi.brar@samsung.com>
  * 	Credits: Graeme Gregory, Sean Choi
  *
  * This program is free software; you can redistribute it and/or modify
@@ -15,7 +15,6 @@
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
-#include <linux/module.h>
 
 #include <sound/soc.h>
 
@@ -74,7 +73,7 @@ static void s3c_ac97_activate(struct snd_ac97 *ac97)
 	if (stat == S3C_AC97_GLBSTAT_MAINSTATE_ACTIVE)
 		return; /* Return if already active */
 
-	INIT_COMPLETION(s3c_ac97.done);
+	reinit_completion(&s3c_ac97.done);
 
 	ac_glbctrl = readl(s3c_ac97.regs + S3C_AC97_GLBCTRL);
 	ac_glbctrl = S3C_AC97_GLBCTRL_ACLINKON;
@@ -103,7 +102,7 @@ static unsigned short s3c_ac97_read(struct snd_ac97 *ac97,
 
 	s3c_ac97_activate(ac97);
 
-	INIT_COMPLETION(s3c_ac97.done);
+	reinit_completion(&s3c_ac97.done);
 
 	ac_codec_cmd = readl(s3c_ac97.regs + S3C_AC97_CODEC_CMD);
 	ac_codec_cmd = S3C_AC97_CODEC_CMD_READ | AC_CMD_ADDR(reg);
@@ -140,7 +139,7 @@ static void s3c_ac97_write(struct snd_ac97 *ac97, unsigned short reg,
 
 	s3c_ac97_activate(ac97);
 
-	INIT_COMPLETION(s3c_ac97.done);
+	reinit_completion(&s3c_ac97.done);
 
 	ac_codec_cmd = readl(s3c_ac97.regs + S3C_AC97_CODEC_CMD);
 	ac_codec_cmd = AC_CMD_ADDR(reg) | AC_CMD_DATA(val);
@@ -272,10 +271,7 @@ static int s3c_ac97_trigger(struct snd_pcm_substream *substream, int cmd,
 
 	writel(ac_glbctrl, s3c_ac97.regs + S3C_AC97_GLBCTRL);
 
-	if (!dma_data->ops)
-		dma_data->ops = samsung_dma_get_ops();
-
-	dma_data->ops->started(dma_data->channel);
+	s3c2410_dma_ctrl(dma_data->channel, S3C2410_DMAOP_STARTED);
 
 	return 0;
 }
@@ -321,10 +317,7 @@ static int s3c_ac97_mic_trigger(struct snd_pcm_substream *substream,
 
 	writel(ac_glbctrl, s3c_ac97.regs + S3C_AC97_GLBCTRL);
 
-	if (!dma_data->ops)
-		dma_data->ops = samsung_dma_get_ops();
-
-	dma_data->ops->started(dma_data->channel);
+	s3c2410_dma_ctrl(dma_data->channel, S3C2410_DMAOP_STARTED);
 
 	return 0;
 }
@@ -439,7 +432,7 @@ static __devinit int s3c_ac97_probe(struct platform_device *pdev)
 	s3c_ac97.ac97_clk = clk_get(&pdev->dev, "ac97");
 	if (IS_ERR(s3c_ac97.ac97_clk)) {
 		dev_err(&pdev->dev, "ac97 failed to get ac97_clock\n");
-		ret = -ENODEV;
+		ret = PTR_ERR(s3c_ac97.ac97_clk);
 		goto err2;
 	}
 	clk_enable(s3c_ac97.ac97_clk);
@@ -451,7 +444,7 @@ static __devinit int s3c_ac97_probe(struct platform_device *pdev)
 	}
 
 	ret = request_irq(irq_res->start, s3c_ac97_irq,
-					0, "AC97", NULL);
+					IRQF_DISABLED, "AC97", NULL);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "ac97: interrupt request failed.\n");
 		goto err4;
@@ -502,16 +495,26 @@ static __devexit int s3c_ac97_remove(struct platform_device *pdev)
 
 static struct platform_driver s3c_ac97_driver = {
 	.probe  = s3c_ac97_probe,
-	.remove = __devexit_p(s3c_ac97_remove),
+	.remove = s3c_ac97_remove,
 	.driver = {
 		.name = "samsung-ac97",
 		.owner = THIS_MODULE,
 	},
 };
 
-module_platform_driver(s3c_ac97_driver);
+static int __init s3c_ac97_init(void)
+{
+	return platform_driver_register(&s3c_ac97_driver);
+}
+module_init(s3c_ac97_init);
 
-MODULE_AUTHOR("Jaswinder Singh, <jassisinghbrar@gmail.com>");
+static void __exit s3c_ac97_exit(void)
+{
+	platform_driver_unregister(&s3c_ac97_driver);
+}
+module_exit(s3c_ac97_exit);
+
+MODULE_AUTHOR("Jaswinder Singh, <jassi.brar@samsung.com>");
 MODULE_DESCRIPTION("AC97 driver for the Samsung SoC");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:samsung-ac97");

@@ -850,10 +850,9 @@ acornfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 	u_int y_bottom = var->yoffset;
 
 	if (!(var->vmode & FB_VMODE_YWRAP))
-		y_bottom += info->var.yres;
+		y_bottom += var->yres;
 
-	if (y_bottom > info->var.yres_virtual)
-		return -EINVAL;
+	BUG_ON(y_bottom > var->yres_virtual);
 
 	acornfb_update_dma(info, var);
 
@@ -1205,9 +1204,7 @@ free_unused_pages(unsigned int virtual_start, unsigned int virtual_end)
 		 * the page.
 		 */
 		page = virt_to_page(virtual_start);
-		ClearPageReserved(page);
-		init_page_count(page);
-		free_page(virtual_start);
+		__free_reserved_page(page);
 
 		virtual_start += PAGE_SIZE;
 		mb_freed += PAGE_SIZE / 1024;

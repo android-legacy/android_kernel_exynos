@@ -27,6 +27,10 @@ RPM := $(shell if [ -x "/usr/bin/rpmbuild" ]; then echo rpmbuild; \
 
 # Remove hyphens since they have special meaning in RPM filenames
 KERNELPATH := kernel-$(subst -,_,$(KERNELRELEASE))
+# Include only those top-level files that are needed by make, plus the GPL copy
+TAR_CONTENT := $(KBUILD_ALLDIRS) kernel.spec .config .scmversion Makefile \
+               Kbuild Kconfig COPYING $(wildcard localversion*)
+TAR_CONTENT := $(addprefix $(KERNELPATH)/,$(TAR_CONTENT))
 MKSPEC     := $(srctree)/scripts/package/mkspec
 PREV       := set -e; cd -P ..;
 
@@ -45,7 +49,7 @@ rpm-pkg rpm: $(objtree)/kernel.spec FORCE
 	$(MAKE) clean
 	$(PREV) ln -sf $(srctree) $(KERNELPATH)
 	$(CONFIG_SHELL) $(srctree)/scripts/setlocalversion --save-scmversion
-	$(PREV) tar -cz $(RCS_TAR_IGNORE) -f $(KERNELPATH).tar.gz $(KERNELPATH)/.
+	$(PREV) tar -cz $(RCS_TAR_IGNORE) -f $(KERNELPATH).tar.gz $(TAR_CONTENT)
 	$(PREV) rm $(KERNELPATH)
 	rm -f $(objtree)/.scmversion
 	set -e; \
@@ -124,7 +128,9 @@ git --git-dir=$(srctree)/.git archive --prefix=$(perf-tar)/         \
 	-o $(perf-tar).tar;                                         \
 mkdir -p $(perf-tar);                                               \
 git --git-dir=$(srctree)/.git rev-parse HEAD > $(perf-tar)/HEAD;    \
-tar rf $(perf-tar).tar $(perf-tar)/HEAD;                            \
+(cd $(srctree)/tools/perf;                                          \
+util/PERF-VERSION-GEN ../../$(perf-tar)/ 2>/dev/null);              \
+tar rf $(perf-tar).tar $(perf-tar)/HEAD $(perf-tar)/PERF-VERSION-FILE; \
 rm -r $(perf-tar);                                                  \
 $(if $(findstring tar-src,$@),,                                     \
 $(if $(findstring bz2,$@),bzip2,                                    \
@@ -141,7 +147,7 @@ perf-%pkg: FORCE
 help: FORCE
 	@echo '  rpm-pkg             - Build both source and binary RPM kernel packages'
 	@echo '  binrpm-pkg          - Build only the binary kernel package'
-	@echo '  deb-pkg             - Build the kernel as a deb package'
+	@echo '  deb-pkg             - Build the kernel as an deb package'
 	@echo '  tar-pkg             - Build the kernel as an uncompressed tarball'
 	@echo '  targz-pkg           - Build the kernel as a gzip compressed tarball'
 	@echo '  tarbz2-pkg          - Build the kernel as a bzip2 compressed tarball'

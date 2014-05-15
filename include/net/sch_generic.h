@@ -4,6 +4,7 @@
 #include <linux/netdevice.h>
 #include <linux/types.h>
 #include <linux/rcupdate.h>
+#include <linux/module.h>
 #include <linux/pkt_sched.h>
 #include <linux/pkt_cls.h>
 #include <net/gen_stats.h>
@@ -188,7 +189,8 @@ struct tcf_proto_ops {
 
 	unsigned long		(*get)(struct tcf_proto*, u32 handle);
 	void			(*put)(struct tcf_proto*, unsigned long);
-	int			(*change)(struct tcf_proto*, unsigned long,
+	int			(*change)(struct sk_buff *,
+					struct tcf_proto*, unsigned long,
 					u32 handle, struct nlattr **,
 					unsigned long *);
 	int			(*delete)(struct tcf_proto*, unsigned long);
@@ -220,7 +222,7 @@ struct tcf_proto {
 
 struct qdisc_skb_cb {
 	unsigned int		pkt_len;
-	u16			bond_queue_mapping;
+	u16			slave_dev_queue_mapping;
 	u16			_pad;
 	unsigned char		data[20];
 };
@@ -331,11 +333,10 @@ static inline struct Qdisc_class_common *
 qdisc_class_find(const struct Qdisc_class_hash *hash, u32 id)
 {
 	struct Qdisc_class_common *cl;
-	struct hlist_node *n;
 	unsigned int h;
 
 	h = qdisc_class_hash(id, hash->hashmask);
-	hlist_for_each_entry(cl, n, &hash->hash[h], hnode) {
+	hlist_for_each_entry(cl, &hash->hash[h], hnode) {
 		if (cl->classid == id)
 			return cl;
 	}

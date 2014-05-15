@@ -258,7 +258,7 @@ EXPORT_SYMBOL_GPL(unregister_vt_notifier);
 
 static void notify_write(struct vc_data *vc, unsigned int unicode)
 {
-	struct vt_notifier_param param = { .vc = vc, .c = unicode };
+	struct vt_notifier_param param = { .vc = vc, unicode = unicode };
 	atomic_notifier_call_chain(&vt_notifier_list, VT_WRITE, &param);
 }
 
@@ -656,7 +656,7 @@ static inline void save_screen(struct vc_data *vc)
  *	Redrawing of screen
  */
 
-void clear_buffer_attributes(struct vc_data *vc)
+static void clear_buffer_attributes(struct vc_data *vc)
 {
 	unsigned short *p = (unsigned short *)vc->vc_origin;
 	int count = vc->vc_screenbuf_size / 2;
@@ -1380,7 +1380,7 @@ static void respond_string(const char *p, struct tty_struct *tty)
 		tty_insert_flip_char(tty, *p, 0);
 		p++;
 	}
-	con_schedule_flip(tty);
+	tty_schedule_flip(tty);
 }
 
 static void cursor_report(struct vc_data *vc, struct tty_struct *tty)
@@ -2622,9 +2622,7 @@ int tioclinux(struct tty_struct *tty, unsigned long arg)
 			console_unlock();
 			break;
 		case TIOCL_SELLOADLUT:
-			console_lock();
 			ret = sel_loadlut(p);
-			console_unlock();
 			break;
 		case TIOCL_GETSHIFTSTATE:
 
@@ -2792,40 +2790,51 @@ static void con_flush_chars(struct tty_struct *tty)
 /*
  * Allocate the console screen memory.
  */
-static int con_open(struct tty_struct *tty, struct file *filp)
+static int con_install(struct tty_driver *driver, struct tty_struct *tty)
 {
 	unsigned int currcons = tty->index;
-	int ret = 0;
+	struct vc_data *vc;
+	int ret;
 
 	console_lock();
-	if (tty->driver_data == NULL) {
-		ret = vc_allocate(currcons);
-		if (ret == 0) {
-			struct vc_data *vc = vc_cons[currcons].d;
+	ret = vc_allocate(currcons);
+	if (ret)
+		goto unlock;
 
-			/* Still being freed */
-			if (vc->port.tty) {
-				console_unlock();
-				return -ERESTARTSYS;
-			}
-			tty->driver_data = vc;
-			vc->port.tty = tty;
+	vc = vc_cons[currcons].d;
 
-			if (!tty->winsize.ws_row && !tty->winsize.ws_col) {
-				tty->winsize.ws_row = vc_cons[currcons].d->vc_rows;
-				tty->winsize.ws_col = vc_cons[currcons].d->vc_cols;
-			}
-			if (vc->vc_utf)
-				tty->termios->c_iflag |= IUTF8;
-			else
-				tty->termios->c_iflag &= ~IUTF8;
-			console_unlock();
-			return ret;
-		}
+	/* Still being freed */
+	if (vc->port.tty) {
+		ret = -ERESTARTSYS;
+		goto unlock;
 	}
+
+	ret = tty_port_install(&vc->port, driver, tty);
+	if (ret)
+		goto unlock;
+
+	tty->driver_data = vc;
+	vc->port.tty = tty;
+
+	if (!tty->winsize.ws_row && !tty->winsize.ws_col) {
+		tty->winsize.ws_row = vc_cons[currcons].d->vc_rows;
+		tty->winsize.ws_col = vc_cons[currcons].d->vc_cols;
+	}
+	if (vc->vc_utf)
+		tty->termios.c_iflag |= IUTF8;
+	else
+		tty->termios.c_iflag &= ~IUTF8;
+unlock:
 	console_unlock();
 	return ret;
 }
+
+static int con_open(struct tty_struct *tty, struct file *filp)
+{
+	/* everything done in install */
+	return 0;
+}
+
 
 static void con_close(struct tty_struct *tty, struct file *filp)
 {
@@ -2932,10 +2941,11 @@ static int __init con_init(void)
 	gotoxy(vc, vc->vc_x, vc->vc_y);
 	csi_J(vc, 0);
 	update_screen(vc);
-	pr_info("Console: %s %s %dx%d\n",
+	pr_info("Console: %s %s %dx%d",
 		vc->vc_can_do_color ? "colour" : "mono",
 		display_desc, vc->vc_cols, vc->vc_rows);
 	printable = 1;
+	printk("\n");
 
 	console_unlock();
 
@@ -2947,6 +2957,7 @@ static int __init con_init(void)
 console_initcall(con_init);
 
 static const struct tty_operations con_ops = {
+	.install = con_install,
 	.open = con_open,
 	.close = con_close,
 	.write = con_write,
@@ -3488,19 +3499,6 @@ int con_debug_enter(struct vc_data *vc)
 		};
 		if (kdbgetintenv(setargs[0], &linecount)) {
 			snprintf(lns, 4, "%i", vc->vc_rows);
-			kdb_set(2, setargs);
-		}
-	}
-	if (vc->vc_cols < 999) {
-		int colcount;
-		char cols[4];
-		const char *setargs[3] = {
-			"set",
-			"COLUMNS",
-			cols,
-		};
-		if (kdbgetintenv(setargs[0], &colcount)) {
-			snprintf(cols, 4, "%i", vc->vc_cols);
 			kdb_set(2, setargs);
 		}
 	}
@@ -4054,6 +4052,9 @@ static int con_font_get(struct vc_data *vc, struct console_font_op *op)
 	int rc = -EINVAL;
 	int c;
 
+	if (vc->vc_mode != KD_TEXT)
+		return -EINVAL;
+
 	if (op->data) {
 		font.data = kmalloc(max_font_size, GFP_KERNEL);
 		if (!font.data)
@@ -4062,9 +4063,7 @@ static int con_font_get(struct vc_data *vc, struct console_font_op *op)
 		font.data = NULL;
 
 	console_lock();
-	if (vc->vc_mode != KD_TEXT)
-		rc = -EINVAL;
-	else if (vc->vc_sw->con_font_get)
+	if (vc->vc_sw->con_font_get)
 		rc = vc->vc_sw->con_font_get(vc, &font);
 	else
 		rc = -ENOSYS;
@@ -4146,9 +4145,7 @@ static int con_font_set(struct vc_data *vc, struct console_font_op *op)
 	if (IS_ERR(font.data))
 		return PTR_ERR(font.data);
 	console_lock();
-	if (vc->vc_mode != KD_TEXT)
-		rc = -EINVAL;
-	else if (vc->vc_sw->con_font_set)
+	if (vc->vc_sw->con_font_set)
 		rc = vc->vc_sw->con_font_set(vc, &font, op->flags);
 	else
 		rc = -ENOSYS;
@@ -4164,6 +4161,8 @@ static int con_font_default(struct vc_data *vc, struct console_font_op *op)
 	char *s = name;
 	int rc;
 
+	if (vc->vc_mode != KD_TEXT)
+		return -EINVAL;
 
 	if (!op->data)
 		s = NULL;
@@ -4173,10 +4172,6 @@ static int con_font_default(struct vc_data *vc, struct console_font_op *op)
 		name[MAX_FONT_NAME - 1] = 0;
 
 	console_lock();
-	if (vc->vc_mode != KD_TEXT) {
-		console_unlock();
-		return -EINVAL;
-	}
 	if (vc->vc_sw->con_font_default)
 		rc = vc->vc_sw->con_font_default(vc, &font, s);
 	else
@@ -4194,11 +4189,11 @@ static int con_font_copy(struct vc_data *vc, struct console_font_op *op)
 	int con = op->height;
 	int rc;
 
+	if (vc->vc_mode != KD_TEXT)
+		return -EINVAL;
 
 	console_lock();
-	if (vc->vc_mode != KD_TEXT)
-		rc = -EINVAL;
-	else if (!vc->vc_sw->con_font_copy)
+	if (!vc->vc_sw->con_font_copy)
 		rc = -ENOSYS;
 	else if (con < 0 || !vc_cons_allocated(con))
 		rc = -ENOTTY;

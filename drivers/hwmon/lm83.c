@@ -1,7 +1,7 @@
 /*
  * lm83.c - Part of lm_sensors, Linux kernel modules for hardware
  *          monitoring
- * Copyright (C) 2003-2009  Jean Delvare <khali@linux-fr.org>
+ * Copyright (C) 2003-2009  Jean Delvare <jdelvare@suse.de>
  *
  * Heavily inspired from the lm78, lm75 and adm1021 drivers. The LM83 is
  * a sensor chip made by National Semiconductor. It reports up to four
@@ -343,11 +343,10 @@ static int lm83_probe(struct i2c_client *new_client,
 	struct lm83_data *data;
 	int err;
 
-	data = kzalloc(sizeof(struct lm83_data), GFP_KERNEL);
-	if (!data) {
-		err = -ENOMEM;
-		goto exit;
-	}
+	data = devm_kzalloc(&new_client->dev, sizeof(struct lm83_data),
+			    GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
 
 	i2c_set_clientdata(new_client, data);
 	data->valid = 0;
@@ -362,7 +361,7 @@ static int lm83_probe(struct i2c_client *new_client,
 
 	err = sysfs_create_group(&new_client->dev.kobj, &lm83_group);
 	if (err)
-		goto exit_free;
+		return err;
 
 	if (id->driver_data == lm83) {
 		err = sysfs_create_group(&new_client->dev.kobj,
@@ -382,9 +381,6 @@ static int lm83_probe(struct i2c_client *new_client,
 exit_remove_files:
 	sysfs_remove_group(&new_client->dev.kobj, &lm83_group);
 	sysfs_remove_group(&new_client->dev.kobj, &lm83_group_opt);
-exit_free:
-	kfree(data);
-exit:
 	return err;
 }
 
@@ -396,7 +392,6 @@ static int lm83_remove(struct i2c_client *client)
 	sysfs_remove_group(&client->dev.kobj, &lm83_group);
 	sysfs_remove_group(&client->dev.kobj, &lm83_group_opt);
 
-	kfree(data);
 	return 0;
 }
 
@@ -432,6 +427,6 @@ static struct lm83_data *lm83_update_device(struct device *dev)
 
 module_i2c_driver(lm83_driver);
 
-MODULE_AUTHOR("Jean Delvare <khali@linux-fr.org>");
+MODULE_AUTHOR("Jean Delvare <jdelvare@suse.de>");
 MODULE_DESCRIPTION("LM83 driver");
 MODULE_LICENSE("GPL");

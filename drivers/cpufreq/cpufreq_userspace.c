@@ -11,18 +11,16 @@
  *
  */
 
-#include <linux/kernel.h>
-#include <linux/module.h>
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
+#include "cpufreq_governor.h"
+
 #include <linux/smp.h>
-#include <linux/init.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
-#include <linux/cpufreq.h>
-#include <linux/cpu.h>
 #include <linux/types.h>
 #include <linux/fs.h>
 #include <linux/sysfs.h>
-#include <linux/mutex.h>
 
 /**
  * A few values needed by the userspace governor
@@ -47,11 +45,9 @@ userspace_cpufreq_notifier(struct notifier_block *nb, unsigned long val,
 	if (!per_cpu(cpu_is_managed, freq->cpu))
 		return 0;
 
-	if (val == CPUFREQ_POSTCHANGE) {
-		pr_debug("saving cpu_cur_freq of cpu %u to be %u kHz\n",
-				freq->cpu, freq->new);
-		per_cpu(cpu_cur_freq, freq->cpu) = freq->new;
-	}
+	pr_debug("saving cpu_cur_freq of cpu %u to be %u kHz\n",
+			freq->cpu, freq->new);
+	per_cpu(cpu_cur_freq, freq->cpu) = freq->new;
 
 	return 0;
 }
@@ -116,8 +112,6 @@ static int cpufreq_governor_userspace(struct cpufreq_policy *policy,
 
 	switch (event) {
 	case CPUFREQ_GOV_START:
-		if (!cpu_online(cpu))
-			return -EINVAL;
 		BUG_ON(!policy->cur);
 		mutex_lock(&userspace_mutex);
 

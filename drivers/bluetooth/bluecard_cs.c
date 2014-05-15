@@ -231,12 +231,12 @@ static void bluecard_write_wakeup(bluecard_info_t *info)
 	}
 
 	do {
-		register unsigned int iobase = info->p_dev->resource[0]->start;
-		register unsigned int offset;
-		register unsigned char command;
-		register unsigned long ready_bit;
+		unsigned int iobase = info->p_dev->resource[0]->start;
+		unsigned int offset;
+		unsigned char command;
+		unsigned long ready_bit;
 		register struct sk_buff *skb;
-		register int len;
+		int len;
 
 		clear_bit(XMIT_WAKEUP, &(info->tx_state));
 
@@ -691,6 +691,11 @@ static int bluecard_hci_send_frame(struct sk_buff *skb)
 }
 
 
+static void bluecard_hci_destruct(struct hci_dev *hdev)
+{
+}
+
+
 static int bluecard_hci_ioctl(struct hci_dev *hdev, unsigned int cmd, unsigned long arg)
 {
 	return -ENOIOCTLCMD;
@@ -736,6 +741,7 @@ static int bluecard_open(bluecard_info_t *info)
 	hdev->close    = bluecard_hci_close;
 	hdev->flush    = bluecard_hci_flush;
 	hdev->send     = bluecard_hci_send_frame;
+	hdev->destruct = bluecard_hci_destruct;
 	hdev->ioctl    = bluecard_hci_ioctl;
 
 	id = inb(iobase + 0x30);
@@ -836,7 +842,9 @@ static int bluecard_close(bluecard_info_t *info)
 	/* Turn FPGA off */
 	outb(0x80, iobase + 0x30);
 
-	hci_unregister_dev(hdev);
+	if (hci_unregister_dev(hdev) < 0)
+		BT_ERR("Can't unregister HCI device %s", hdev->name);
+
 	hci_free_dev(hdev);
 
 	return 0;

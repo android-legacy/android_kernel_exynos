@@ -148,6 +148,13 @@ struct rtc_class_ops {
 	int (*set_time)(struct device *, struct rtc_time *);
 	int (*read_alarm)(struct device *, struct rtc_wkalrm *);
 	int (*set_alarm)(struct device *, struct rtc_wkalrm *);
+#if defined(CONFIG_RTC_ALARM_BOOT)
+	int (*set_alarm_boot)(struct device *, struct rtc_wkalrm *);
+	int (*get_alarm_boot)(struct device *, struct rtc_wkalrm *);
+#elif defined(CONFIG_RTC_POWER_OFF)
+	int (*set_alarm_poweroff)(struct device *, struct rtc_wkalrm *);
+	int (*set_alarm_enable)(struct device *, int enable);
+#endif
 	int (*proc)(struct device *, struct seq_file *);
 	int (*set_mmss)(struct device *, unsigned long secs);
 	int (*read_callback)(struct device *, int data);
@@ -202,8 +209,7 @@ struct rtc_device
 	struct hrtimer pie_timer; /* sub second exp, so needs hrtimer */
 	int pie_enabled;
 	struct work_struct irqwork;
-	/* Some hardware can't support UIE mode */
-	int uie_unsupported;
+
 
 #ifdef CONFIG_RTC_INTF_DEV_UIE_EMUL
 	struct work_struct uie_task;
@@ -222,22 +228,39 @@ extern struct rtc_device *rtc_device_register(const char *name,
 					struct device *dev,
 					const struct rtc_class_ops *ops,
 					struct module *owner);
+extern struct rtc_device *devm_rtc_device_register(struct device *dev,
+					const char *name,
+					const struct rtc_class_ops *ops,
+					struct module *owner);
 extern void rtc_device_unregister(struct rtc_device *rtc);
+extern void devm_rtc_device_unregister(struct device *dev,
+					struct rtc_device *rtc);
 
 extern int rtc_read_time(struct rtc_device *rtc, struct rtc_time *tm);
 extern int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm);
 extern int rtc_set_mmss(struct rtc_device *rtc, unsigned long secs);
+extern int rtc_set_ntp_time(struct timespec now);
 int __rtc_read_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm);
 extern int rtc_read_alarm(struct rtc_device *rtc,
 			struct rtc_wkalrm *alrm);
 extern int rtc_set_alarm(struct rtc_device *rtc,
 				struct rtc_wkalrm *alrm);
+#if defined(CONFIG_RTC_ALARM_BOOT)
+extern int rtc_set_alarm_boot(struct rtc_device *rtc,
+				struct rtc_wkalrm *alarm);
+extern int rtc_get_alarm_boot(struct rtc_device *rtc,
+				struct rtc_wkalrm *alarm);
+#elif defined(CONFIG_RTC_POWER_OFF)
+extern int rtc_set_alarm_poweroff(struct rtc_device *rtc,
+					struct rtc_wkalrm *alarm);
+extern int rtc_set_alarm_enable(struct rtc_device *rtc, int enable);
+#endif
 extern int rtc_initialize_alarm(struct rtc_device *rtc,
-				struct rtc_wkalrm *alrm);
+					struct rtc_wkalrm *alrm);
 extern void rtc_update_irq(struct rtc_device *rtc,
 			unsigned long num, unsigned long events);
 
-extern struct rtc_device *rtc_class_open(char *name);
+extern struct rtc_device *rtc_class_open(const char *name);
 extern void rtc_class_close(struct rtc_device *rtc);
 
 extern int rtc_irq_register(struct rtc_device *rtc,
@@ -273,10 +296,14 @@ static inline bool is_leap_year(unsigned int year)
 	return (!(year % 4) && (year % 100)) || !(year % 400);
 }
 
-#ifdef CONFIG_RTC_HCTOSYS
+#ifdef CONFIG_RTC_HCTOSYS_DEVICE
 extern int rtc_hctosys_ret;
 #else
 #define rtc_hctosys_ret -ENODEV
+#endif
+
+#if defined(CONFIG_RTC_ALARM_BOOT)
+extern unsigned int lpcharge;
 #endif
 
 #endif /* __KERNEL__ */

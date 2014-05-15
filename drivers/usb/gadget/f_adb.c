@@ -48,6 +48,7 @@ struct adb_dev {
 	atomic_t read_excl;
 	atomic_t write_excl;
 	atomic_t open_excl;
+	struct delayed_work adb_release_w;
 
 	struct list_head tx_idle;
 
@@ -57,6 +58,9 @@ struct adb_dev {
 	int rx_done;
 };
 
+static void adb_ready_callback(void);
+static void adb_closed_callback(void);
+
 static struct usb_interface_descriptor adb_interface_desc = {
 	.bLength                = USB_DT_INTERFACE_SIZE,
 	.bDescriptorType        = USB_DT_INTERFACE,
@@ -65,6 +69,31 @@ static struct usb_interface_descriptor adb_interface_desc = {
 	.bInterfaceClass        = 0xFF,
 	.bInterfaceSubClass     = 0x42,
 	.bInterfaceProtocol     = 1,
+};
+
+static struct usb_endpoint_descriptor adb_superspeed_in_desc = {
+	.bLength                = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType        = USB_DT_ENDPOINT,
+	.bEndpointAddress       = USB_DIR_IN,
+	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize         = __constant_cpu_to_le16(1024),
+};
+
+static struct usb_endpoint_descriptor adb_superspeed_out_desc = {
+	.bLength                = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType        = USB_DT_ENDPOINT,
+	.bEndpointAddress       = USB_DIR_OUT,
+	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize         = __constant_cpu_to_le16(1024),
+};
+
+static struct usb_ss_ep_comp_descriptor adb_superspeed_bulk_comp_desc = {
+	.bLength =              sizeof adb_superspeed_bulk_comp_desc,
+	.bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 2 values can be tweaked if necessary */
+	/* .bMaxBurst =         0, */
+	/* .bmAttributes =      0, */
 };
 
 static struct usb_endpoint_descriptor adb_highspeed_in_desc = {
@@ -108,6 +137,15 @@ static struct usb_descriptor_header *hs_adb_descs[] = {
 	(struct usb_descriptor_header *) &adb_interface_desc,
 	(struct usb_descriptor_header *) &adb_highspeed_in_desc,
 	(struct usb_descriptor_header *) &adb_highspeed_out_desc,
+	NULL,
+};
+
+static struct usb_descriptor_header *ss_adb_descs[] = {
+	(struct usb_descriptor_header *) &adb_interface_desc,
+	(struct usb_descriptor_header *) &adb_superspeed_in_desc,
+	(struct usb_descriptor_header *) &adb_superspeed_bulk_comp_desc,
+	(struct usb_descriptor_header *) &adb_superspeed_out_desc,
+	(struct usb_descriptor_header *) &adb_superspeed_bulk_comp_desc,
 	NULL,
 };
 
@@ -270,12 +308,14 @@ static ssize_t adb_read(struct file *fp, char __user *buf,
 	struct adb_dev *dev = fp->private_data;
 	struct usb_request *req;
 	int r = count, xfer;
-	int maxp;
 	int ret;
 
 	pr_debug("adb_read(%d)\n", count);
 	if (!_adb_dev)
 		return -ENODEV;
+
+	if (count > ADB_BULK_BUFFER_SIZE)
+		return -EINVAL;
 
 	if (adb_lock(&dev->read_excl))
 		return -EBUSY;
@@ -294,12 +334,6 @@ static ssize_t adb_read(struct file *fp, char __user *buf,
 		r = -EIO;
 		goto done;
 	}
-
-	maxp = usb_endpoint_maxp(dev->ep_out->desc);
-	count = round_up(count, maxp);
-
-	if (count > ADB_BULK_BUFFER_SIZE)
-		return -EINVAL;
 
 requeue_req:
 	/* queue a request */
@@ -332,6 +366,7 @@ requeue_req:
 
 		pr_debug("rx %p %d\n", req, req->actual);
 		xfer = (req->actual < count) ? req->actual : count;
+		r = xfer;
 		if (copy_to_user(buf, req->buf, xfer))
 			r = -EFAULT;
 
@@ -411,6 +446,11 @@ static ssize_t adb_write(struct file *fp, const char __user *buf,
 	return r;
 }
 
+static void adb_release_work(struct work_struct *w)
+{
+	adb_closed_callback();
+}
+
 static int adb_open(struct inode *ip, struct file *fp)
 {
 	pr_info("adb_open\n");
@@ -425,7 +465,8 @@ static int adb_open(struct inode *ip, struct file *fp)
 	/* clear the error latch */
 	_adb_dev->error = 0;
 
-	adb_ready_callback();
+	if (!cancel_delayed_work_sync(&_adb_dev->adb_release_w))
+		adb_ready_callback();
 
 	return 0;
 }
@@ -434,14 +475,23 @@ static int adb_release(struct inode *ip, struct file *fp)
 {
 	pr_info("adb_release\n");
 
-	adb_closed_callback();
+	/*
+	 * When USB cable is plugged out, adb reader is unblocked and
+	 * -EIO is returned to user space. adb daemon reopen the port
+	 * which would disable and enable USB configuration unnecessarily.
+	 *
+	 * Delay notifying the adb close event to android by 1 sec. If
+	 * ADB daemon opens the port with in 1 sec, USB configuration
+	 * re-enable does not happen.
+	 */
+	schedule_delayed_work(&_adb_dev->adb_release_w, msecs_to_jiffies(1000));
 
 	adb_unlock(&_adb_dev->open_excl);
 	return 0;
 }
 
 /* file operations for ADB device /dev/android_adb */
-static const struct file_operations adb_fops = {
+static struct file_operations adb_fops = {
 	.owner = THIS_MODULE,
 	.read = adb_read,
 	.write = adb_write,
@@ -454,9 +504,6 @@ static struct miscdevice adb_device = {
 	.name = adb_shortname,
 	.fops = &adb_fops,
 };
-
-
-
 
 static int
 adb_function_bind(struct usb_configuration *c, struct usb_function *f)
@@ -489,7 +536,16 @@ adb_function_bind(struct usb_configuration *c, struct usb_function *f)
 			adb_fullspeed_out_desc.bEndpointAddress;
 	}
 
+	/* support super speed hardware */
+	if (gadget_is_superspeed(c->cdev->gadget)) {
+		adb_superspeed_in_desc.bEndpointAddress =
+			adb_fullspeed_in_desc.bEndpointAddress;
+		adb_superspeed_out_desc.bEndpointAddress =
+			adb_fullspeed_out_desc.bEndpointAddress;
+	}
+
 	DBG(cdev, "%s speed %s: IN/%s, OUT/%s\n",
+			gadget_is_superspeed(c->cdev->gadget) ? "super" :
 			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
 			f->name, dev->ep_in->name, dev->ep_out->name);
 	return 0;
@@ -520,20 +576,16 @@ static int adb_function_set_alt(struct usb_function *f,
 	int ret;
 
 	DBG(cdev, "adb_function_set_alt intf: %d alt: %d\n", intf, alt);
-
-	ret = config_ep_by_speed(cdev->gadget, f, dev->ep_in);
+	ret = usb_ep_enable(dev->ep_in,
+			ep_choose(cdev->gadget,
+				&adb_highspeed_in_desc,
+				&adb_fullspeed_in_desc));
 	if (ret)
 		return ret;
-
-	ret = usb_ep_enable(dev->ep_in);
-	if (ret)
-		return ret;
-
-	ret = config_ep_by_speed(cdev->gadget, f, dev->ep_out);
-	if (ret)
-		return ret;
-
-	ret = usb_ep_enable(dev->ep_out);
+	ret = usb_ep_enable(dev->ep_out,
+			ep_choose(cdev->gadget,
+				&adb_highspeed_out_desc,
+				&adb_fullspeed_out_desc));
 	if (ret) {
 		usb_ep_disable(dev->ep_in);
 		return ret;
@@ -572,6 +624,7 @@ static int adb_bind_config(struct usb_configuration *c)
 	dev->function.name = "adb";
 	dev->function.descriptors = fs_adb_descs;
 	dev->function.hs_descriptors = hs_adb_descs;
+	dev->function.ss_descriptors = ss_adb_descs;
 	dev->function.bind = adb_function_bind;
 	dev->function.unbind = adb_function_unbind;
 	dev->function.set_alt = adb_function_set_alt;
@@ -598,6 +651,7 @@ static int adb_setup(void)
 	atomic_set(&dev->read_excl, 0);
 	atomic_set(&dev->write_excl, 0);
 
+	INIT_DELAYED_WORK(&dev->adb_release_w, adb_release_work);
 	INIT_LIST_HEAD(&dev->tx_idle);
 
 	_adb_dev = dev;

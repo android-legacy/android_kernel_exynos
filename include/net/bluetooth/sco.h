@@ -22,6 +22,9 @@
    SOFTWARE IS DISCLAIMED.
 */
 
+#ifdef CONFIG_BT_TIZEN
+#include "tizen/sco.h"
+#else
 #ifndef __SCO_H
 #define __SCO_H
 
@@ -38,6 +41,8 @@ struct sockaddr_sco {
 	sa_family_t	sco_family;
 	bdaddr_t	sco_bdaddr;
 	__u16		sco_pkt_type;
+	/* wbs */
+	__s8		is_wbs;
 };
 
 /* SCO socket options */
@@ -79,3 +84,5 @@ struct sco_pinfo {
 };
 
 #endif /* __SCO_H */
+
+#endif /* BT_TIZEN */

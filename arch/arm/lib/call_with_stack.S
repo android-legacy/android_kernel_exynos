@@ -2,7 +2,7 @@
  * arch/arm/lib/call_with_stack.S
  *
  * Copyright (C) 2011 ARM Ltd.
- * Written by Will Deacon <will.deacon@arm.com>
+ * Written by Will Deacon <will.deacon at arm.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as

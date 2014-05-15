@@ -135,6 +135,10 @@ int usb_control_msg(struct usb_device *dev, unsigned int pipe, __u8 request,
 {
 	struct usb_ctrlrequest *dr;
 	int ret;
+#if defined(CONFIG_LINK_DEVICE_HSIC) && (defined(CONFIG_UMTS_MODEM_XMM6262)\
+					|| defined(CONFIG_UMTS_MODEM_XMM6260))
+	int limit_timeout;
+#endif
 
 	dr = kmalloc(sizeof(struct usb_ctrlrequest), GFP_NOIO);
 	if (!dr)
@@ -148,8 +152,23 @@ int usb_control_msg(struct usb_device *dev, unsigned int pipe, __u8 request,
 
 	/* dbg("usb_control_msg"); */
 
-	ret = usb_internal_control_msg(dev, pipe, dr, data, size, timeout);
+#if defined(CONFIG_LINK_DEVICE_HSIC) && (defined(CONFIG_UMTS_MODEM_XMM6262)\
+					|| defined(CONFIG_UMTS_MODEM_XMM6260))
+	/* Sometimes AP can't received the HSIC descriptor when AP L3->L0
+	 * reset-resume, then got the dpm_timeout panic caused 5sec * retry
+	 * timeout. we can get the cp dump after dpm resume.
+	 * portnum 2 is HSIC phy0 for CP.
+	 */
+	limit_timeout = (dev->portnum == 2) ? min(timeout, 1500) : timeout;
 
+	/* pr_debug("%s: dev=%s, portnum=%d, timeout=%d\n", __func__,
+		dev_name(&dev->dev), dev->portnum, limit_timeout); */
+
+	ret = usb_internal_control_msg(dev, pipe, dr, data, size,
+		limit_timeout);
+#else
+	ret = usb_internal_control_msg(dev, pipe, dr, data, size, timeout);
+#endif
 	kfree(dr);
 
 	return ret;
@@ -435,7 +454,7 @@ int usb_sg_init(struct usb_sg_request *io, struct usb_device *dev,
 
 			len = sg->length;
 			if (length) {
-				len = min_t(size_t, len, length);
+				len = min_t(unsigned, len, length);
 				length -= len;
 				if (length == 0)
 					io->entries = i + 1;
@@ -1516,7 +1535,6 @@ static void usb_release_interface(struct device *dev)
 	kfree(intf);
 }
 
-#ifdef	CONFIG_HOTPLUG
 static int usb_if_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
 	struct usb_device *usb_dev;
@@ -1535,7 +1553,7 @@ static int usb_if_uevent(struct device *dev, struct kobj_uevent_env *env)
 
 	if (add_uevent_var(env,
 		   "MODALIAS=usb:"
-		   "v%04Xp%04Xd%04Xdc%02Xdsc%02Xdp%02Xic%02Xisc%02Xip%02X",
+		   "v%04Xp%04Xd%04Xdc%02Xdsc%02Xdp%02Xic%02Xisc%02Xip%02Xin%02X",
 		   le16_to_cpu(usb_dev->descriptor.idVendor),
 		   le16_to_cpu(usb_dev->descriptor.idProduct),
 		   le16_to_cpu(usb_dev->descriptor.bcdDevice),
@@ -1544,19 +1562,12 @@ static int usb_if_uevent(struct device *dev, struct kobj_uevent_env *env)
 		   usb_dev->descriptor.bDeviceProtocol,
 		   alt->desc.bInterfaceClass,
 		   alt->desc.bInterfaceSubClass,
-		   alt->desc.bInterfaceProtocol))
+		   alt->desc.bInterfaceProtocol,
+		   alt->desc.bInterfaceNumber))
 		return -ENOMEM;
 
 	return 0;
 }
-
-#else
-
-static int usb_if_uevent(struct device *dev, struct kobj_uevent_env *env)
-{
-	return -ENODEV;
-}
-#endif	/* CONFIG_HOTPLUG */
 
 struct device_type usb_if_device_type = {
 	.name =		"usb_interface",
@@ -1868,6 +1879,11 @@ free_interfaces:
 				dev_name(&intf->dev), ret);
 			continue;
 		}
+#ifdef CONFIG_HOST_COMPLIANT_TEST
+		if (usb_get_intfdata(intf) == NULL ) {
+		       dev_info( &intf->dev, "%s : Not match interface - driver detect fail\n",__func__);
+		}
+#endif
 		create_intf_ep_devs(intf);
 	}
 

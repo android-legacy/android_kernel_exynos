@@ -155,7 +155,6 @@ static struct fc_fcp_pkt *fc_fcp_pkt_alloc(struct fc_lport *lport, gfp_t gfp)
 		fsp->xfer_ddp = FC_XID_UNKNOWN;
 		atomic_set(&fsp->ref_cnt, 1);
 		init_timer(&fsp->timer);
-		fsp->timer.data = (unsigned long)fsp;
 		INIT_LIST_HEAD(&fsp->list);
 		spin_lock_init(&fsp->scsi_pkt_lock);
 	}
@@ -499,7 +498,7 @@ crc_err:
 			stats = per_cpu_ptr(lport->dev_stats, get_cpu());
 			stats->ErrorFrames++;
 			/* per cpu count, not total count, but OK for limit */
-			if (stats->InvalidCRCCount++ < FC_MAX_ERROR_CNT)
+			if (stats->InvalidCRCCount++ < 5)
 				printk(KERN_WARNING "libfc: CRC error on data "
 				       "frame for port (%6.6x)\n",
 				       lport->port_id);
@@ -691,7 +690,7 @@ static int fc_fcp_send_data(struct fc_fcp_pkt *fsp, struct fc_seq *seq,
 }
 
 /**
- * fc_fcp_abts_resp() - Receive an ABTS response
+ * fc_fcp_abts_resp() - Send an ABTS response
  * @fsp: The FCP packet that is being aborted
  * @fp:	 The response frame
  */
@@ -731,7 +730,7 @@ static void fc_fcp_abts_resp(struct fc_fcp_pkt *fsp, struct fc_frame *fp)
 }
 
 /**
- * fc_fcp_recv() - Receive an FCP frame
+ * fc_fcp_recv() - Reveive an FCP frame
  * @seq: The sequence the frame is on
  * @fp:	 The received frame
  * @arg: The related FCP packet
@@ -760,6 +759,7 @@ static void fc_fcp_recv(struct fc_seq *seq, struct fc_frame *fp, void *arg)
 		goto out;
 	if (fc_fcp_lock_pkt(fsp))
 		goto out;
+	fsp->last_pkt_time = jiffies;
 
 	if (fh->fh_type == FC_TYPE_BLS) {
 		fc_fcp_abts_resp(fsp, fp);
@@ -893,7 +893,8 @@ static void fc_fcp_resp(struct fc_fcp_pkt *fsp, struct fc_frame *fp)
 	/*
 	 * Check for missing or extra data frames.
 	 */
-	if (unlikely(fsp->xfer_len != expected_len)) {
+	if (unlikely(fsp->cdb_status == SAM_STAT_GOOD &&
+		     fsp->xfer_len != expected_len)) {
 		if (fsp->xfer_len < expected_len) {
 			/*
 			 * Some data may be queued locally,
@@ -946,12 +947,11 @@ static void fc_fcp_complete_locked(struct fc_fcp_pkt *fsp)
 		 * Test for transport underrun, independent of response
 		 * underrun status.
 		 */
-		if (fsp->xfer_len < fsp->data_len && !fsp->io_status &&
+		if (fsp->cdb_status == SAM_STAT_GOOD &&
+		    fsp->xfer_len < fsp->data_len && !fsp->io_status &&
 		    (!(fsp->scsi_comp_flags & FCP_RESID_UNDER) ||
-		     fsp->xfer_len < fsp->data_len - fsp->scsi_resid)) {
+		     fsp->xfer_len < fsp->data_len - fsp->scsi_resid))
 			fsp->status_code = FC_DATA_UNDRUN;
-			fsp->io_status = 0;
-		}
 	}
 
 	seq = fsp->seq_ptr;
@@ -1074,7 +1074,8 @@ static int fc_fcp_pkt_send(struct fc_lport *lport, struct fc_fcp_pkt *fsp)
 	fsp->cdb_cmd.fc_dl = htonl(fsp->data_len);
 	fsp->cdb_cmd.fc_flags = fsp->req_flags & ~FCP_CFL_LEN_MASK;
 
-	int_to_scsilun(fsp->cmd->device->lun, &fsp->cdb_cmd.fc_lun);
+	int_to_scsilun(fsp->cmd->device->lun,
+		       (struct scsi_lun *)fsp->cdb_cmd.fc_lun);
 	memcpy(fsp->cdb_cmd.fc_cdb, fsp->cmd->cmnd, fsp->cmd->cmd_len);
 
 	spin_lock_irqsave(&si->scsi_queue_lock, flags);
@@ -1083,7 +1084,6 @@ static int fc_fcp_pkt_send(struct fc_lport *lport, struct fc_fcp_pkt *fsp)
 	rc = lport->tt.fcp_cmd_send(lport, fsp, fc_fcp_recv);
 	if (unlikely(rc)) {
 		spin_lock_irqsave(&si->scsi_queue_lock, flags);
-		fsp->cmd->SCp.ptr = NULL;
 		list_del(&fsp->list);
 		spin_unlock_irqrestore(&si->scsi_queue_lock, flags);
 	}
@@ -1147,6 +1147,7 @@ static int fc_fcp_cmd_send(struct fc_lport *lport, struct fc_fcp_pkt *fsp,
 		rc = -1;
 		goto unlock;
 	}
+	fsp->last_pkt_time = jiffies;
 	fsp->seq_ptr = seq;
 	fc_fcp_pkt_hold(fsp);	/* hold for fc_fcp_pkt_destroy */
 
@@ -1256,7 +1257,7 @@ static int fc_lun_reset(struct fc_lport *lport, struct fc_fcp_pkt *fsp,
 
 	fsp->cdb_cmd.fc_dl = htonl(fsp->data_len);
 	fsp->cdb_cmd.fc_tm_flags = FCP_TMF_LUN_RESET;
-	int_to_scsilun(lun, &fsp->cdb_cmd.fc_lun);
+	int_to_scsilun(lun, (struct scsi_lun *)fsp->cdb_cmd.fc_lun);
 
 	fsp->wait_for_comp = 1;
 	init_completion(&fsp->tm_done);
@@ -1644,10 +1645,12 @@ static void fc_fcp_srr(struct fc_fcp_pkt *fsp, enum fc_rctl r_ctl, u32 offset)
 	struct fc_seq *seq;
 	struct fcp_srr *srr;
 	struct fc_frame *fp;
+	u8 cdb_op;
 	unsigned int rec_tov;
 
 	rport = fsp->rport;
 	rpriv = rport->dd_data;
+	cdb_op = fsp->cdb_cmd.fc_cdb[0];
 
 	if (!(rpriv->flags & FC_RP_FLAGS_RETRY) ||
 	    rpriv->rp_state != RPORT_ST_READY)
@@ -1849,6 +1852,9 @@ int fc_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *sc_cmd)
 		stats->ControlRequests++;
 	}
 	put_cpu();
+
+	init_timer(&fsp->timer);
+	fsp->timer.data = (unsigned long)fsp;
 
 	/*
 	 * send it to the lower layer

@@ -10,8 +10,13 @@
 
 #include <linux/types.h>
 #include <linux/scatterlist.h>
+#include <linux/kernel.h>
 
 struct scsi_cmnd;
+
+enum scsi_timeouts {
+	SCSI_DEFAULT_EH_TIMEOUT		= 10 * HZ,
+};
 
 /*
  * The maximum number of SG segments that we will put inside a
@@ -143,12 +148,12 @@ struct scsi_cmnd;
 #define READ_ATTRIBUTE        0x8c
 #define WRITE_ATTRIBUTE	      0x8d
 #define VERIFY_16	      0x8f
-#define SYNCHRONIZE_CACHE_16  0x91
 #define WRITE_SAME_16	      0x93
 #define SERVICE_ACTION_IN     0x9e
 /* values for service action in */
 #define	SAI_READ_CAPACITY_16  0x10
 #define SAI_GET_LBA_STATUS    0x12
+#define SAI_REPORT_REFERRALS  0x13
 /* values for VARIABLE_LENGTH_CMD service action codes
  * see spc4r17 Section D.3.5, table D.7 and D.8 */
 #define VLC_SA_RECEIVE_CREDENTIAL 0x1800
@@ -213,6 +218,16 @@ scsi_command_size(const unsigned char *cmnd)
 	return (cmnd[0] == VARIABLE_LENGTH_CMD) ?
 		scsi_varlen_cdb_length(cmnd) : COMMAND_SIZE(cmnd[0]);
 }
+
+#ifdef CONFIG_ACPI
+struct acpi_bus_type;
+
+extern int
+scsi_register_acpi_bus_type(struct acpi_bus_type *bus);
+
+extern void
+scsi_unregister_acpi_bus_type(struct acpi_bus_type *bus);
+#endif
 
 /*
  *  SCSI Architecture Model (SAM) Status codes. Taken from SAM-3 draft
@@ -440,6 +455,8 @@ static inline int scsi_is_wlun(unsigned int lun)
 				 * other paths */
 #define DID_NEXUS_FAILURE 0x11  /* Permanent nexus failure, retry on other
 				 * paths might yield different results */
+#define DID_ALLOC_FAILURE 0x12  /* Space allocation on the device failed */
+#define DID_MEDIUM_ERROR  0x13  /* Medium error */
 #define DRIVER_OK       0x00	/* Driver status                           */
 
 /*
@@ -469,7 +486,6 @@ static inline int scsi_is_wlun(unsigned int lun)
 #define TIMEOUT_ERROR   0x2007
 #define SCSI_RETURN_NOT_HANDLED   0x2008
 #define FAST_IO_FAIL	0x2009
-#define TARGET_ERROR    0x200A
 
 /*
  * Midlevel queue return values.

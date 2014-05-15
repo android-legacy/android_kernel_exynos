@@ -35,7 +35,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -1103,26 +1102,7 @@ static struct pci_driver scc_pci_driver = {
 #endif
 };
 
-static int __init scc_init (void)
-{
-	int rc;
-
-	DPRINTK("pci_register_driver\n");
-	rc = pci_register_driver(&scc_pci_driver);
-	if (rc)
-		return rc;
-
-	DPRINTK("done\n");
-	return 0;
-}
-
-static void __exit scc_exit (void)
-{
-	pci_unregister_driver(&scc_pci_driver);
-}
-
-module_init(scc_init);
-module_exit(scc_exit);
+module_pci_driver(scc_pci_driver);
 
 MODULE_AUTHOR("Toshiba corp");
 MODULE_DESCRIPTION("SCSI low-level driver for Toshiba SCC PATA controller");

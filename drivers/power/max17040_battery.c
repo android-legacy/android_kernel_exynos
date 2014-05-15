@@ -232,7 +232,7 @@ static int __devinit max17040_probe(struct i2c_client *client,
 	max17040_reset(client);
 	max17040_get_version(client);
 
-	INIT_DELAYED_WORK_DEFERRABLE(&chip->work, max17040_work);
+	INIT_DEFERRABLE_WORK(&chip->work, max17040_work);
 	schedule_delayed_work(&chip->work, MAX17040_DELAY);
 
 	return 0;
@@ -290,7 +290,18 @@ static struct i2c_driver max17040_i2c_driver = {
 	.resume		= max17040_resume,
 	.id_table	= max17040_id,
 };
-module_i2c_driver(max17040_i2c_driver);
+
+static int __init max17040_init(void)
+{
+	return i2c_add_driver(&max17040_i2c_driver);
+}
+module_init(max17040_init);
+
+static void __exit max17040_exit(void)
+{
+	i2c_del_driver(&max17040_i2c_driver);
+}
+module_exit(max17040_exit);
 
 MODULE_AUTHOR("Minkyu Kang <mk7.kang@samsung.com>");
 MODULE_DESCRIPTION("MAX17040 Fuel Gauge");

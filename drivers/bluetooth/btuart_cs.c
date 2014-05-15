@@ -140,9 +140,9 @@ static void btuart_write_wakeup(btuart_info_t *info)
 	}
 
 	do {
-		register unsigned int iobase = info->p_dev->resource[0]->start;
+		unsigned int iobase = info->p_dev->resource[0]->start;
 		register struct sk_buff *skb;
-		register int len;
+		int len;
 
 		clear_bit(XMIT_WAKEUP, &(info->tx_state));
 
@@ -458,6 +458,11 @@ static int btuart_hci_send_frame(struct sk_buff *skb)
 }
 
 
+static void btuart_hci_destruct(struct hci_dev *hdev)
+{
+}
+
+
 static int btuart_hci_ioctl(struct hci_dev *hdev, unsigned int cmd, unsigned long arg)
 {
 	return -ENOIOCTLCMD;
@@ -499,6 +504,7 @@ static int btuart_open(btuart_info_t *info)
 	hdev->close    = btuart_hci_close;
 	hdev->flush    = btuart_hci_flush;
 	hdev->send     = btuart_hci_send_frame;
+	hdev->destruct = btuart_hci_destruct;
 	hdev->ioctl    = btuart_hci_ioctl;
 
 	spin_lock_irqsave(&(info->lock), flags);
@@ -556,7 +562,9 @@ static int btuart_close(btuart_info_t *info)
 
 	spin_unlock_irqrestore(&(info->lock), flags);
 
-	hci_unregister_dev(hdev);
+	if (hci_unregister_dev(hdev) < 0)
+		BT_ERR("Can't unregister HCI device %s", hdev->name);
+
 	hci_free_dev(hdev);
 
 	return 0;

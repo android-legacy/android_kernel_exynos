@@ -25,12 +25,11 @@
 #include <linux/io.h>
 #include <linux/memory.h>
 #include <linux/delay.h>
+#include <linux/irqreturn.h>
 #include <linux/kthread.h>
 
 #include <video/mipi_display.h>
 #include <video/exynos_mipi_dsim.h>
-
-#include <mach/map.h>
 
 #include "exynos_mipi_dsi_regs.h"
 #include "exynos_mipi_dsi_lowlevel.h"
@@ -76,33 +75,20 @@ static unsigned int dpll_table[15] = {
 
 irqreturn_t exynos_mipi_dsi_interrupt_handler(int irq, void *dev_id)
 {
-	unsigned int intsrc = 0;
-	unsigned int intmsk = 0;
-	struct mipi_dsim_device *dsim = NULL;
-
-	dsim = dev_id;
-	if (!dsim) {
-		dev_dbg(dsim->dev, KERN_ERR "%s:error: wrong parameter\n",
-							__func__);
-		return IRQ_HANDLED;
-	}
+	struct mipi_dsim_device *dsim = dev_id;
+	unsigned int intsrc, intmsk;
 
 	intsrc = exynos_mipi_dsi_read_interrupt(dsim);
 	intmsk = exynos_mipi_dsi_read_interrupt_mask(dsim);
+	intmsk = ~intmsk & intsrc;
 
-	intmsk = ~(intmsk) & intsrc;
-
-	switch (intmsk) {
-	case INTMSK_RX_DONE:
+	if (intsrc & INTMSK_RX_DONE) {
 		complete(&dsim_rd_comp);
 		dev_dbg(dsim->dev, "MIPI INTMSK_RX_DONE\n");
-		break;
-	case INTMSK_FIFO_EMPTY:
+	}
+	if (intsrc & INTMSK_FIFO_EMPTY) {
 		complete(&dsim_wr_comp);
 		dev_dbg(dsim->dev, "MIPI INTMSK_FIFO_EMPTY\n");
-		break;
-	default:
-		break;
 	}
 
 	exynos_mipi_dsi_clear_interrupt(dsim, intmsk);
@@ -234,7 +220,7 @@ int exynos_mipi_dsi_wr_data(struct mipi_dsim_device *dsim, unsigned int data_id,
 	case MIPI_DSI_DCS_LONG_WRITE:
 	{
 		unsigned int size, payload = 0;
-		INIT_COMPLETION(dsim_wr_comp);
+		reinit_completion(&dsim_wr_comp);
 
 		size = data_size * 4;
 
@@ -296,9 +282,6 @@ int exynos_mipi_dsi_wr_data(struct mipi_dsim_device *dsim, unsigned int data_id,
 		mutex_unlock(&dsim->lock);
 		return -EINVAL;
 	}
-
-	mutex_unlock(&dsim->lock);
-	return 0;
 }
 
 static unsigned int exynos_mipi_dsi_long_data_rd(struct mipi_dsim_device *dsim,
@@ -373,7 +356,7 @@ int exynos_mipi_dsi_rd_data(struct mipi_dsim_device *dsim, unsigned int data_id,
 	msleep(20);
 
 	mutex_lock(&dsim->lock);
-	INIT_COMPLETION(dsim_rd_comp);
+	reinit_completion(&dsim_rd_comp);
 	exynos_mipi_dsi_rd_tx_header(dsim,
 		MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE, req_size);
 
@@ -738,11 +721,11 @@ int exynos_mipi_dsi_set_display_mode(struct mipi_dsim_device *dsim,
 		if (dsim_config->auto_vertical_cnt == 0) {
 			exynos_mipi_dsi_set_main_disp_vporch(dsim,
 				dsim_config->cmd_allow,
-				timing->upper_margin,
-				timing->lower_margin);
+				timing->lower_margin,
+				timing->upper_margin);
 			exynos_mipi_dsi_set_main_disp_hporch(dsim,
-				timing->left_margin,
-				timing->right_margin);
+				timing->right_margin,
+				timing->left_margin);
 			exynos_mipi_dsi_set_main_disp_sync_area(dsim,
 				timing->vsync_len,
 				timing->hsync_len);

@@ -82,6 +82,9 @@ typedef struct dtl1_info_t {
 
 
 static int dtl1_config(struct pcmcia_device *link);
+static void dtl1_release(struct pcmcia_device *link);
+
+static void dtl1_detach(struct pcmcia_device *p_dev);
 
 
 /* Transmit states  */
@@ -144,9 +147,9 @@ static void dtl1_write_wakeup(dtl1_info_t *info)
 	}
 
 	do {
-		register unsigned int iobase = info->p_dev->resource[0]->start;
+		unsigned int iobase = info->p_dev->resource[0]->start;
 		register struct sk_buff *skb;
-		register int len;
+		int len;
 
 		clear_bit(XMIT_WAKEUP, &(info->tx_state));
 
@@ -438,6 +441,11 @@ static int dtl1_hci_send_frame(struct sk_buff *skb)
 }
 
 
+static void dtl1_hci_destruct(struct hci_dev *hdev)
+{
+}
+
+
 static int dtl1_hci_ioctl(struct hci_dev *hdev, unsigned int cmd,  unsigned long arg)
 {
 	return -ENOIOCTLCMD;
@@ -481,6 +489,7 @@ static int dtl1_open(dtl1_info_t *info)
 	hdev->close    = dtl1_hci_close;
 	hdev->flush    = dtl1_hci_flush;
 	hdev->send     = dtl1_hci_send_frame;
+	hdev->destruct = dtl1_hci_destruct;
 	hdev->ioctl    = dtl1_hci_ioctl;
 
 	spin_lock_irqsave(&(info->lock), flags);
@@ -539,7 +548,9 @@ static int dtl1_close(dtl1_info_t *info)
 
 	spin_unlock_irqrestore(&(info->lock), flags);
 
-	hci_unregister_dev(hdev);
+	if (hci_unregister_dev(hdev) < 0)
+		BT_ERR("Can't unregister HCI device %s", hdev->name);
+
 	hci_free_dev(hdev);
 
 	return 0;
@@ -567,8 +578,8 @@ static void dtl1_detach(struct pcmcia_device *link)
 {
 	dtl1_info_t *info = link->priv;
 
-	dtl1_close(info);
-	pcmcia_disable_device(link);
+	dtl1_release(link);
+
 	kfree(info);
 }
 
@@ -607,9 +618,20 @@ static int dtl1_config(struct pcmcia_device *link)
 	return 0;
 
 failed:
-	dtl1_detach(link);
+	dtl1_release(link);
 	return -ENODEV;
 }
+
+
+static void dtl1_release(struct pcmcia_device *link)
+{
+	dtl1_info_t *info = link->priv;
+
+	dtl1_close(info);
+
+	pcmcia_disable_device(link);
+}
+
 
 static const struct pcmcia_device_id dtl1_ids[] = {
 	PCMCIA_DEVICE_PROD_ID12("Nokia Mobile Phones", "DTL-1", 0xe1bfdd64, 0xe168480d),

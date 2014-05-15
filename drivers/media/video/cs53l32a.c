@@ -248,4 +248,15 @@ static struct i2c_driver cs53l32a_driver = {
 	.id_table	= cs53l32a_id,
 };
 
-module_i2c_driver(cs53l32a_driver);
+static __init int init_cs53l32a(void)
+{
+	return i2c_add_driver(&cs53l32a_driver);
+}
+
+static __exit void exit_cs53l32a(void)
+{
+	i2c_del_driver(&cs53l32a_driver);
+}
+
+module_init(init_cs53l32a);
+module_exit(exit_cs53l32a);

@@ -402,8 +402,16 @@
 #define __NR_syncfs			(__NR_SYSCALL_BASE+373)
 #define __NR_sendmmsg			(__NR_SYSCALL_BASE+374)
 #define __NR_setns			(__NR_SYSCALL_BASE+375)
-#define __NR_process_vm_readv		(__NR_SYSCALL_BASE+376)
-#define __NR_process_vm_writev		(__NR_SYSCALL_BASE+377)
+#define __NR_sched_setattr		(__NR_SYSCALL_BASE+376)
+#define __NR_sched_getattr		(__NR_SYSCALL_BASE+377)
+
+/*
+ * This may need to be greater than __NR_last_syscall+1 in order to
+ * account for the padding in the syscall table
+ */
+#ifdef __KERNEL__
+#define __NR_syscalls  (380)
+#endif /* __KERNEL__ */
 
 /*
  * The following SWIs are ARM private.
@@ -427,8 +435,7 @@
 /*
  * The following syscalls are obsolete and no longer available for EABI.
  */
-#if !defined(__KERNEL__)
-#if defined(__ARM_EABI__)
+#if defined(__ARM_EABI__) && !defined(__KERNEL__)
 #undef __NR_time
 #undef __NR_umount
 #undef __NR_stime
@@ -442,11 +449,9 @@
 #undef __NR_syscall
 #undef __NR_ipc
 #endif
-#endif
 
 #ifdef __KERNEL__
 
-#define __ARCH_WANT_IPC_PARSE_VERSION
 #define __ARCH_WANT_STAT64
 #define __ARCH_WANT_SYS_GETHOSTNAME
 #define __ARCH_WANT_SYS_PAUSE
@@ -455,8 +460,6 @@
 #define __ARCH_WANT_SYS_NICE
 #define __ARCH_WANT_SYS_SIGPENDING
 #define __ARCH_WANT_SYS_SIGPROCMASK
-#define __ARCH_WANT_SYS_RT_SIGACTION
-#define __ARCH_WANT_SYS_RT_SIGSUSPEND
 #define __ARCH_WANT_SYS_OLD_MMAP
 #define __ARCH_WANT_SYS_OLD_SELECT
 
@@ -470,14 +473,9 @@
 #define __ARCH_WANT_OLD_READDIR
 #define __ARCH_WANT_SYS_SOCKETCALL
 #endif
-
-/*
- * "Conditional" syscalls
- *
- * What we want is __attribute__((weak,alias("sys_ni_syscall"))),
- * but it doesn't work on all toolchains, so we just do it by hand
- */
-#define cond_syscall(x) asm(".weak\t" #x "\n\t.set\t" #x ",sys_ni_syscall")
+#define __ARCH_WANT_SYS_FORK
+#define __ARCH_WANT_SYS_VFORK
+#define __ARCH_WANT_SYS_CLONE
 
 /*
  * Unimplemented (or alternatively implemented) syscalls

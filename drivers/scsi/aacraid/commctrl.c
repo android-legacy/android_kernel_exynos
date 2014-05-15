@@ -318,7 +318,8 @@ return_fib:
 			kthread_stop(dev->thread);
 			ssleep(1);
 			dev->aif_thread = 0;
-			dev->thread = kthread_run(aac_command_thread, dev, dev->name);
+			dev->thread = kthread_run(aac_command_thread, dev,
+						  "%s", dev->name);
 			ssleep(1);
 		}
 		if (f.wait) {
@@ -650,7 +651,6 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 				     AAC_OPT_NEW_COMM) ?
 				      (dev->scsi_host_ptr->max_sectors << 9) :
 				      65536)) {
-					kfree(usg);
 					rcode = -EINVAL;
 					goto cleanup;
 				}

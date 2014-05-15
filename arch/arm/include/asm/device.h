@@ -15,12 +15,7 @@ struct dev_archdata {
 #endif
 };
 
-struct omap_device;
-
 struct pdev_archdata {
-#ifdef CONFIG_ARCH_OMAP
-	struct omap_device *od;
-#endif
 };
 
 #endif

@@ -29,7 +29,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -534,7 +533,7 @@ err_out:
 #ifdef CONFIG_PM
 static int atp867x_reinit_one(struct pci_dev *pdev)
 {
-	struct ata_host *host = dev_get_drvdata(&pdev->dev);
+	struct ata_host *host = pci_get_drvdata(pdev);
 	int rc;
 
 	rc = ata_pci_device_do_resume(pdev);
@@ -565,21 +564,10 @@ static struct pci_driver atp867x_driver = {
 #endif
 };
 
-static int __init atp867x_init(void)
-{
-	return pci_register_driver(&atp867x_driver);
-}
-
-static void __exit atp867x_exit(void)
-{
-	pci_unregister_driver(&atp867x_driver);
-}
+module_pci_driver(atp867x_driver);
 
 MODULE_AUTHOR("John(Jung-Ik) Lee, Google Inc.");
 MODULE_DESCRIPTION("low level driver for Artop/Acard 867x ATA controller");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, atp867x_pci_tbl);
 MODULE_VERSION(DRV_VERSION);
-
-module_init(atp867x_init);
-module_exit(atp867x_exit);

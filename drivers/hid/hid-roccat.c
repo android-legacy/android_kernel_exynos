@@ -25,9 +25,9 @@
 
 #include <linux/cdev.h>
 #include <linux/poll.h>
+#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/hid-roccat.h>
-#include <linux/module.h>
 
 #define ROCCAT_FIRST_MINOR 0
 #define ROCCAT_MAX_DEVICES 8
@@ -163,27 +163,27 @@ static int roccat_open(struct inode *inode, struct file *file)
 
 	device = devices[minor];
 
+	mutex_lock(&device->readers_lock);
+
 	if (!device) {
 		pr_emerg("roccat device with minor %d doesn't exist\n", minor);
 		error = -ENODEV;
-		goto exit_err_devices;
+		goto exit_err;
 	}
-
-	mutex_lock(&device->readers_lock);
 
 	if (!device->open++) {
 		/* power on device on adding first reader */
 		error = hid_hw_power(device->hid, PM_HINT_FULLON);
 		if (error < 0) {
 			--device->open;
-			goto exit_err_readers;
+			goto exit_err;
 		}
 
 		error = hid_hw_open(device->hid);
 		if (error < 0) {
 			hid_hw_power(device->hid, PM_HINT_NORMAL);
 			--device->open;
-			goto exit_err_readers;
+			goto exit_err;
 		}
 	}
 
@@ -194,13 +194,13 @@ static int roccat_open(struct inode *inode, struct file *file)
 	list_add_tail(&reader->node, &device->readers);
 	file->private_data = reader;
 
-exit_err_readers:
+exit_unlock:
 	mutex_unlock(&device->readers_lock);
-exit_err_devices:
 	mutex_unlock(&devices_lock);
-	if (error)
-		kfree(reader);
 	return error;
+exit_err:
+	kfree(reader);
+	goto exit_unlock;
 }
 
 static int roccat_release(struct inode *inode, struct file *file)
@@ -378,7 +378,7 @@ EXPORT_SYMBOL_GPL(roccat_disconnect);
 
 static long roccat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	struct inode *inode = file->f_path.dentry->d_inode;
+	struct inode *inode = file_inode(file);
 	struct roccat_device *device;
 	unsigned int minor = iminor(inode);
 	long retval = 0;

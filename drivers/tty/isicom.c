@@ -102,7 +102,7 @@
  *	You can find the original tools for this direct from Multitech
  *		ftp://ftp.multitech.com/ISI-Cards/
  *
- *	Having installed the cards the module options (/etc/modprobe.d/)
+ *	Having installed the cards the module options (/etc/modprobe.conf)
  *
  *	options isicom   io=card1,card2,card3,card4 irq=card1,card2,card3,card4
  *
@@ -702,7 +702,7 @@ static void isicom_config_port(struct tty_struct *tty)
 
 		/* 1,2,3,4 => 57.6, 115.2, 230, 460 kbps resp. */
 		if (baud < 1 || baud > 4)
-			tty->termios->c_cflag &= ~CBAUDEX;
+			tty->termios.c_cflag &= ~CBAUDEX;
 		else
 			baud += 15;
 	}
@@ -848,6 +848,8 @@ static struct tty_port *isicom_find_port(struct tty_struct *tty)
 	unsigned int board;
 	int line = tty->index;
 
+	if (line < 0 || line > PORT_COUNT-1)
+		return NULL;
 	board = BOARD(line);
 	card = &isi_card[board];
 
@@ -1196,8 +1198,8 @@ static void isicom_set_termios(struct tty_struct *tty,
 	if (isicom_paranoia_check(port, tty->name, "isicom_set_termios"))
 		return;
 
-	if (tty->termios->c_cflag == old_termios->c_cflag &&
-			tty->termios->c_iflag == old_termios->c_iflag)
+	if (tty->termios.c_cflag == old_termios->c_cflag &&
+			tty->termios.c_iflag == old_termios->c_iflag)
 		return;
 
 	spin_lock_irqsave(&port->card->card_lock, flags);
@@ -1205,7 +1207,7 @@ static void isicom_set_termios(struct tty_struct *tty,
 	spin_unlock_irqrestore(&port->card->card_lock, flags);
 
 	if ((old_termios->c_cflag & CRTSCTS) &&
-			!(tty->termios->c_cflag & CRTSCTS)) {
+			!(tty->termios.c_cflag & CRTSCTS)) {
 		tty->hw_stopped = 0;
 		isicom_start(tty);
 	}
@@ -1595,7 +1597,7 @@ static int __devinit isicom_probe(struct pci_dev *pdev,
 	}
 
 	retval = request_irq(board->irq, isicom_interrupt,
-			IRQF_SHARED, ISICOM_NAME, board);
+			IRQF_SHARED | IRQF_DISABLED, ISICOM_NAME, board);
 	if (retval < 0) {
 		dev_err(&pdev->dev, "Could not install handler at Irq %d. "
 			"Card%d will be disabled.\n", board->irq, index + 1);

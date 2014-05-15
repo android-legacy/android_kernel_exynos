@@ -183,6 +183,9 @@ struct ieee80211_radiotap_header {
  *     Contains a bitmap of known fields/flags, the flags, and
  *     the MCS index.
  *
+ * IEEE80211_RADIOTAP_AMPDU_STATUS	u32, u16, u8, u8	unitless
+ *
+ *	Contains the AMPDU information for the subframe.
  */
 enum ieee80211_radiotap_type {
 	IEEE80211_RADIOTAP_TSFT = 0,
@@ -205,6 +208,7 @@ enum ieee80211_radiotap_type {
 	IEEE80211_RADIOTAP_DATA_RETRIES = 17,
 
 	IEEE80211_RADIOTAP_MCS = 19,
+	IEEE80211_RADIOTAP_AMPDU_STATUS = 20,
 
 	/* valid in every it_present bitmap, even vendor namespaces */
 	IEEE80211_RADIOTAP_RADIOTAP_NAMESPACE = 29,
@@ -251,7 +255,6 @@ enum ieee80211_radiotap_type {
 						 * retries */
 #define IEEE80211_RADIOTAP_F_TX_CTS	0x0002	/* used cts 'protection' */
 #define IEEE80211_RADIOTAP_F_TX_RTS	0x0004	/* used rts/cts handshake */
-#define IEEE80211_RADIOTAP_F_TX_NOACK	0x0008	/* don't expect an ack */
 
 
 /* For IEEE80211_RADIOTAP_MCS */
@@ -270,6 +273,21 @@ enum ieee80211_radiotap_type {
 #define IEEE80211_RADIOTAP_MCS_FMT_GF		0x08
 #define IEEE80211_RADIOTAP_MCS_FEC_LDPC		0x10
 
+/* For IEEE80211_RADIOTAP_AMPDU_STATUS */
+#define IEEE80211_RADIOTAP_AMPDU_REPORT_ZEROLEN		0x0001
+#define IEEE80211_RADIOTAP_AMPDU_IS_ZEROLEN		0x0002
+#define IEEE80211_RADIOTAP_AMPDU_LAST_KNOWN		0x0004
+#define IEEE80211_RADIOTAP_AMPDU_IS_LAST		0x0008
+#define IEEE80211_RADIOTAP_AMPDU_DELIM_CRC_ERR		0x0010
+#define IEEE80211_RADIOTAP_AMPDU_DELIM_CRC_KNOWN	0x0020
+
+/* Ugly macro to convert literal channel numbers into their mhz equivalents
+ * There are certianly some conditions that will break this (like feeding it '30')
+ * but they shouldn't arise since nothing talks on channel 30. */
+#define ieee80211chan2mhz(x) \
+	(((x) <= 14) ? \
+	(((x) == 14) ? 2484 : ((x) * 5) + 2407) : \
+	((x) + 1000) * 5)
 
 /* helpers */
 static inline int ieee80211_get_radiotap_len(unsigned char *data)

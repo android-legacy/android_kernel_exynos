@@ -1,13 +1,14 @@
 #ifndef _ASM_S390_FUTEX_H
 #define _ASM_S390_FUTEX_H
 
-#ifdef __KERNEL__
-
 #include <linux/futex.h>
 #include <linux/uaccess.h>
 #include <asm/errno.h>
 
-static inline int futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
+int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr, u32 oldval, u32 newval);
+int __futex_atomic_op_inuser(int op, u32 __user *uaddr, int oparg, int *old);
+
+static inline int futex_atomic_op_inuser(int encoded_op, u32 __user *uaddr)
 {
 	int op = (encoded_op >> 28) & 7;
 	int cmp = (encoded_op >> 24) & 15;
@@ -18,11 +19,8 @@ static inline int futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
 	if (encoded_op & (FUTEX_OP_OPARG_SHIFT << 28))
 		oparg = 1 << oparg;
 
-	if (! access_ok (VERIFY_WRITE, uaddr, sizeof(u32)))
-		return -EFAULT;
-
 	pagefault_disable();
-	ret = uaccess.futex_atomic_op(op, uaddr, oparg, &oldval);
+	ret = __futex_atomic_op_inuser(op, uaddr, oparg, &oldval);
 	pagefault_enable();
 
 	if (!ret) {
@@ -39,14 +37,4 @@ static inline int futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
 	return ret;
 }
 
-static inline int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
-						u32 oldval, u32 newval)
-{
-	if (! access_ok (VERIFY_WRITE, uaddr, sizeof(u32)))
-		return -EFAULT;
-
-	return uaccess.futex_atomic_cmpxchg(uval, uaddr, oldval, newval);
-}
-
-#endif /* __KERNEL__ */
 #endif /* _ASM_S390_FUTEX_H */

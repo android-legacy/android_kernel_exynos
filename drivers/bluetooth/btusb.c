@@ -21,15 +21,7 @@
  *
  */
 
-#include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/init.h>
-#include <linux/slab.h>
-#include <linux/types.h>
-#include <linux/sched.h>
-#include <linux/errno.h>
-#include <linux/skbuff.h>
-
 #include <linux/usb.h>
 
 #include <net/bluetooth/bluetooth.h>
@@ -37,13 +29,13 @@
 
 #define VERSION "0.6"
 
-static bool ignore_dga;
-static bool ignore_csr;
-static bool ignore_sniffer;
-static bool disable_scofix;
-static bool force_scofix;
+static int ignore_dga;
+static int ignore_csr;
+static int ignore_sniffer;
+static int disable_scofix;
+static int force_scofix;
 
-static bool reset = 1;
+static int reset = 1;
 
 static struct usb_driver btusb_driver;
 
@@ -60,11 +52,8 @@ static struct usb_device_id btusb_table[] = {
 	/* Generic Bluetooth USB device */
 	{ USB_DEVICE_INFO(0xe0, 0x01, 0x01) },
 
-	/* Apple-specific (Broadcom) devices */
-	{ USB_VENDOR_AND_INTERFACE_INFO(0x05ac, 0xff, 0x01, 0x01) },
-
 	/* Broadcom SoftSailing reporting vendor specific */
-	{ USB_DEVICE(0x0a5c, 0x21e1) },
+	{ USB_DEVICE(0x05ac, 0x21e1) },
 
 	/* Apple MacBookPro 7,1 */
 	{ USB_DEVICE(0x05ac, 0x8213) },
@@ -103,16 +92,6 @@ static struct usb_device_id btusb_table[] = {
 	/* Canyon CN-BTU1 with HID interfaces */
 	{ USB_DEVICE(0x0c10, 0x0000) },
 
-	/* Broadcom BCM20702A0 */
-	{ USB_DEVICE(0x0489, 0xe042) },
-	{ USB_DEVICE(0x413c, 0x8197) },
-
-	/* Foxconn - Hon Hai */
-	{ USB_DEVICE(0x0489, 0xe033) },
-
-	/*Broadcom devices with vendor specific id */
-	{ USB_VENDOR_AND_INTERFACE_INFO(0x0a5c, 0xff, 0x01, 0x01) },
-
 	{ }	/* Terminating entry */
 };
 
@@ -130,7 +109,6 @@ static struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x13d3, 0x3304), .driver_info = BTUSB_IGNORE },
 	{ USB_DEVICE(0x0930, 0x0215), .driver_info = BTUSB_IGNORE },
 	{ USB_DEVICE(0x0489, 0xe03d), .driver_info = BTUSB_IGNORE },
-	{ USB_DEVICE(0x0489, 0xe027), .driver_info = BTUSB_IGNORE },
 
 	/* Atheros AR9285 Malbec with sflash firmware */
 	{ USB_DEVICE(0x03f0, 0x311d), .driver_info = BTUSB_IGNORE },
@@ -142,8 +120,6 @@ static struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x0cf3, 0x817a), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3375), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x04ca, 0x3005), .driver_info = BTUSB_ATH3012 },
-	{ USB_DEVICE(0x13d3, 0x3362), .driver_info = BTUSB_ATH3012 },
-	{ USB_DEVICE(0x0cf3, 0xe004), .driver_info = BTUSB_ATH3012 },
 
 	/* Atheros AR5BBU12 with sflash firmware */
 	{ USB_DEVICE(0x0489, 0xe02c), .driver_info = BTUSB_IGNORE },
@@ -288,9 +264,7 @@ static void btusb_intr_complete(struct urb *urb)
 
 	err = usb_submit_urb(urb, GFP_ATOMIC);
 	if (err < 0) {
-		/* -EPERM: urb is being killed;
-		 * -ENODEV: device got disconnected */
-		if (err != -EPERM && err != -ENODEV)
+		if (err != -EPERM)
 			BT_ERR("%s urb %p failed to resubmit (%d)",
 						hdev->name, urb, -err);
 		usb_unanchor_urb(urb);
@@ -334,8 +308,7 @@ static int btusb_submit_intr_urb(struct hci_dev *hdev, gfp_t mem_flags)
 
 	err = usb_submit_urb(urb, mem_flags);
 	if (err < 0) {
-		if (err != -EPERM && err != -ENODEV)
-			BT_ERR("%s urb %p submission failed (%d)",
+		BT_ERR("%s urb %p submission failed (%d)",
 						hdev->name, urb, -err);
 		usb_unanchor_urb(urb);
 	}
@@ -376,9 +349,7 @@ static void btusb_bulk_complete(struct urb *urb)
 
 	err = usb_submit_urb(urb, GFP_ATOMIC);
 	if (err < 0) {
-		/* -EPERM: urb is being killed;
-		 * -ENODEV: device got disconnected */
-		if (err != -EPERM && err != -ENODEV)
+		if (err != -EPERM)
 			BT_ERR("%s urb %p failed to resubmit (%d)",
 						hdev->name, urb, -err);
 		usb_unanchor_urb(urb);
@@ -420,8 +391,7 @@ static int btusb_submit_bulk_urb(struct hci_dev *hdev, gfp_t mem_flags)
 
 	err = usb_submit_urb(urb, mem_flags);
 	if (err < 0) {
-		if (err != -EPERM && err != -ENODEV)
-			BT_ERR("%s urb %p submission failed (%d)",
+		BT_ERR("%s urb %p submission failed (%d)",
 						hdev->name, urb, -err);
 		usb_unanchor_urb(urb);
 	}
@@ -469,9 +439,7 @@ static void btusb_isoc_complete(struct urb *urb)
 
 	err = usb_submit_urb(urb, GFP_ATOMIC);
 	if (err < 0) {
-		/* -EPERM: urb is being killed;
-		 * -ENODEV: device got disconnected */
-		if (err != -EPERM && err != -ENODEV)
+		if (err != -EPERM)
 			BT_ERR("%s urb %p failed to resubmit (%d)",
 						hdev->name, urb, -err);
 		usb_unanchor_urb(urb);
@@ -539,8 +507,7 @@ static int btusb_submit_isoc_urb(struct hci_dev *hdev, gfp_t mem_flags)
 
 	err = usb_submit_urb(urb, mem_flags);
 	if (err < 0) {
-		if (err != -EPERM && err != -ENODEV)
-			BT_ERR("%s urb %p submission failed (%d)",
+		BT_ERR("%s urb %p submission failed (%d)",
 						hdev->name, urb, -err);
 		usb_unanchor_urb(urb);
 	}
@@ -731,7 +698,8 @@ static int btusb_send_frame(struct sk_buff *skb)
 		break;
 
 	case HCI_ACLDATA_PKT:
-		if (!data->bulk_tx_ep)
+		if (!data->bulk_tx_ep || (hdev->conn_hash.acl_num < 1 &&
+						hdev->conn_hash.le_num < 1))
 			return -ENODEV;
 
 		urb = usb_alloc_urb(0, GFP_ATOMIC);
@@ -787,18 +755,26 @@ skip_waking:
 
 	err = usb_submit_urb(urb, GFP_ATOMIC);
 	if (err < 0) {
-		if (err != -EPERM && err != -ENODEV)
-			BT_ERR("%s urb %p submission failed (%d)",
-						hdev->name, urb, -err);
+		BT_ERR("%s urb %p submission failed", hdev->name, urb);
 		kfree(urb->setup_packet);
 		usb_unanchor_urb(urb);
 	} else {
 		usb_mark_last_busy(data->udev);
 	}
 
-done:
 	usb_free_urb(urb);
+
+done:
 	return err;
+}
+
+static void btusb_destruct(struct hci_dev *hdev)
+{
+	struct btusb_data *data = hci_get_drvdata(hdev);
+
+	BT_DBG("%s", hdev->name);
+
+	kfree(data);
 }
 
 static void btusb_notify(struct hci_dev *hdev, unsigned int evt)
@@ -1013,13 +989,14 @@ static int btusb_probe(struct usb_interface *intf,
 	hdev->close    = btusb_close;
 	hdev->flush    = btusb_flush;
 	hdev->send     = btusb_send_frame;
+	hdev->destruct = btusb_destruct;
 	hdev->notify   = btusb_notify;
 
 	/* Interface numbers are hardcoded in the specification */
 	data->isoc = usb_ifnum_to_if(data->udev, 1);
 
 	if (!reset)
-		set_bit(HCI_QUIRK_NO_RESET, &hdev->quirks);
+		set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
 
 	if (force_scofix || id->driver_info & BTUSB_WRONG_SCO_MTU) {
 		if (!disable_scofix)
@@ -1031,7 +1008,7 @@ static int btusb_probe(struct usb_interface *intf,
 
 	if (id->driver_info & BTUSB_DIGIANSWER) {
 		data->cmdreq_type = USB_TYPE_VENDOR;
-		set_bit(HCI_QUIRK_NO_RESET, &hdev->quirks);
+		set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
 	}
 
 	if (id->driver_info & BTUSB_CSR) {
@@ -1039,7 +1016,7 @@ static int btusb_probe(struct usb_interface *intf,
 
 		/* Old firmware would otherwise execute USB reset */
 		if (le16_to_cpu(udev->descriptor.bcdDevice) < 0x117)
-			set_bit(HCI_QUIRK_NO_RESET, &hdev->quirks);
+			set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
 	}
 
 	if (id->driver_info & BTUSB_SNIFFER) {
@@ -1096,6 +1073,9 @@ static void btusb_disconnect(struct usb_interface *intf)
 		return;
 
 	hdev = data->hdev;
+
+	hci_dev_hold(hdev);
+
 	usb_set_intfdata(data->intf, NULL);
 
 	if (data->isoc)
@@ -1108,8 +1088,9 @@ static void btusb_disconnect(struct usb_interface *intf)
 	else if (data->isoc)
 		usb_driver_release_interface(&btusb_driver, data->isoc);
 
+	hci_dev_put(hdev);
+
 	hci_free_dev(hdev);
-	kfree(data);
 }
 
 #ifdef CONFIG_PM
@@ -1123,7 +1104,7 @@ static int btusb_suspend(struct usb_interface *intf, pm_message_t message)
 		return 0;
 
 	spin_lock_irq(&data->txlock);
-	if (!(PMSG_IS_AUTO(message) && data->tx_in_flight)) {
+	if (!((message.event & PM_EVENT_AUTO) && data->tx_in_flight)) {
 		set_bit(BTUSB_SUSPENDING, &data->flags);
 		spin_unlock_irq(&data->txlock);
 	} else {
@@ -1225,7 +1206,20 @@ static struct usb_driver btusb_driver = {
 	.supports_autosuspend = 1,
 };
 
-module_usb_driver(btusb_driver);
+static int __init btusb_init(void)
+{
+	BT_INFO("Generic Bluetooth USB driver ver %s", VERSION);
+
+	return usb_register(&btusb_driver);
+}
+
+static void __exit btusb_exit(void)
+{
+	usb_deregister(&btusb_driver);
+}
+
+module_init(btusb_init);
+module_exit(btusb_exit);
 
 module_param(ignore_dga, bool, 0644);
 MODULE_PARM_DESC(ignore_dga, "Ignore devices with id 08fd:0001");

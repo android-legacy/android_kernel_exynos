@@ -97,7 +97,6 @@ static int test_cipher_cycles(struct blkcipher_desc *desc, int enc,
 	int ret = 0;
 	int i;
 
-	local_bh_disable();
 	local_irq_disable();
 
 	/* Warm-up run. */
@@ -130,7 +129,6 @@ static int test_cipher_cycles(struct blkcipher_desc *desc, int enc,
 
 out:
 	local_irq_enable();
-	local_bh_enable();
 
 	if (ret == 0)
 		printk("1 operation in %lu cycles (%d bytes)\n",
@@ -300,7 +298,6 @@ static int test_hash_cycles_digest(struct hash_desc *desc,
 	int i;
 	int ret;
 
-	local_bh_disable();
 	local_irq_disable();
 
 	/* Warm-up run. */
@@ -327,7 +324,6 @@ static int test_hash_cycles_digest(struct hash_desc *desc,
 
 out:
 	local_irq_enable();
-	local_bh_enable();
 
 	if (ret)
 		return ret;
@@ -348,7 +344,6 @@ static int test_hash_cycles(struct hash_desc *desc, struct scatterlist *sg,
 	if (plen == blen)
 		return test_hash_cycles_digest(desc, sg, blen, out);
 
-	local_bh_disable();
 	local_irq_disable();
 
 	/* Warm-up run. */
@@ -391,7 +386,6 @@ static int test_hash_cycles(struct hash_desc *desc, struct scatterlist *sg,
 
 out:
 	local_irq_enable();
-	local_bh_enable();
 
 	if (ret)
 		return ret;
@@ -499,7 +493,7 @@ static inline int do_one_ahash_op(struct ahash_request *req, int ret)
 		ret = wait_for_completion_interruptible(&tr->completion);
 		if (!ret)
 			ret = tr->err;
-		INIT_COMPLETION(tr->completion);
+		reinit_completion(&tr->completion);
 	}
 	return ret;
 }
@@ -727,7 +721,7 @@ static inline int do_one_acipher_op(struct ablkcipher_request *req, int ret)
 		ret = wait_for_completion_interruptible(&tr->completion);
 		if (!ret)
 			ret = tr->err;
-		INIT_COMPLETION(tr->completion);
+		reinit_completion(&tr->completion);
 	}
 
 	return ret;
@@ -809,7 +803,7 @@ static void test_acipher_speed(const char *algo, int enc, unsigned int sec,
 			       struct cipher_speed_template *template,
 			       unsigned int tcount, u8 *keysize)
 {
-	unsigned int ret, i, j, iv_len;
+	unsigned int ret, i, j, k, iv_len;
 	struct tcrypt_result tresult;
 	const char *key;
 	char iv[128];
@@ -883,11 +877,23 @@ static void test_acipher_speed(const char *algo, int enc, unsigned int sec,
 			}
 
 			sg_init_table(sg, TVMEMSIZE);
-			sg_set_buf(sg, tvmem[0] + *keysize,
+
+			k = *keysize + *b_size;
+			if (k > PAGE_SIZE) {
+				sg_set_buf(sg, tvmem[0] + *keysize,
 				   PAGE_SIZE - *keysize);
-			for (j = 1; j < TVMEMSIZE; j++) {
-				sg_set_buf(sg + j, tvmem[j], PAGE_SIZE);
-				memset(tvmem[j], 0xff, PAGE_SIZE);
+				k -= PAGE_SIZE;
+				j = 1;
+				while (k > PAGE_SIZE) {
+					sg_set_buf(sg + j, tvmem[j], PAGE_SIZE);
+					memset(tvmem[j], 0xff, PAGE_SIZE);
+					j++;
+					k -= PAGE_SIZE;
+				}
+				sg_set_buf(sg + j, tvmem[j], k);
+				memset(tvmem[j], 0xff, k);
+			} else {
+				sg_set_buf(sg, tvmem[0] + *keysize, *b_size);
 			}
 
 			iv_len = crypto_ablkcipher_ivsize(tfm);
@@ -953,39 +959,45 @@ static int do_test(int m)
 		for (i = 1; i < 200; i++)
 			ret += do_test(i);
 		break;
-
+#ifdef CONFIG_CRYPTO_MD5
 	case 1:
 		ret += tcrypt_test("md5");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_SHA1
 	case 2:
 		ret += tcrypt_test("sha1");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_DES
 	case 3:
 		ret += tcrypt_test("ecb(des)");
 		ret += tcrypt_test("cbc(des)");
+		ret += tcrypt_test("ctr(des)");
 		break;
 
 	case 4:
 		ret += tcrypt_test("ecb(des3_ede)");
 		ret += tcrypt_test("cbc(des3_ede)");
+		ret += tcrypt_test("ctr(des3_ede)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_MD4
 	case 5:
 		ret += tcrypt_test("md4");
 		break;
-
+#endif
 	case 6:
 		ret += tcrypt_test("sha256");
 		break;
-
+#ifdef CONFIG_CRYPTO_BLOWFISH
 	case 7:
 		ret += tcrypt_test("ecb(blowfish)");
 		ret += tcrypt_test("cbc(blowfish)");
 		ret += tcrypt_test("ctr(blowfish)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_TWOFISH
 	case 8:
 		ret += tcrypt_test("ecb(twofish)");
 		ret += tcrypt_test("cbc(twofish)");
@@ -993,7 +1005,8 @@ static int do_test(int m)
 		ret += tcrypt_test("lrw(twofish)");
 		ret += tcrypt_test("xts(twofish)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_SERPENT
 	case 9:
 		ret += tcrypt_test("ecb(serpent)");
 		ret += tcrypt_test("cbc(serpent)");
@@ -1001,16 +1014,22 @@ static int do_test(int m)
 		ret += tcrypt_test("lrw(serpent)");
 		ret += tcrypt_test("xts(serpent)");
 		break;
-
+#endif
 	case 10:
 		ret += tcrypt_test("ecb(aes)");
 		ret += tcrypt_test("cbc(aes)");
+#ifdef CONFIG_CRYPTO_LRW
 		ret += tcrypt_test("lrw(aes)");
+#endif
+#ifdef CONFIG_CRYPTO_XTS
 		ret += tcrypt_test("xts(aes)");
+#endif
+#ifdef CONFIG_CRYPTO_CTR
 		ret += tcrypt_test("ctr(aes)");
 		ret += tcrypt_test("rfc3686(ctr(aes))");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_SHA512
 	case 11:
 		ret += tcrypt_test("sha384");
 		break;
@@ -1018,31 +1037,40 @@ static int do_test(int m)
 	case 12:
 		ret += tcrypt_test("sha512");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_DEFLATE
 	case 13:
 		ret += tcrypt_test("deflate");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_CAST5
 	case 14:
 		ret += tcrypt_test("ecb(cast5)");
+		ret += tcrypt_test("cbc(cast5)");
+		ret += tcrypt_test("ctr(cast5)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_CAST6
 	case 15:
 		ret += tcrypt_test("ecb(cast6)");
+		ret += tcrypt_test("cbc(cast6)");
+		ret += tcrypt_test("ctr(cast6)");
+		ret += tcrypt_test("lrw(cast6)");
+		ret += tcrypt_test("xts(cast6)");
 		break;
-
+#endif
 	case 16:
 		ret += tcrypt_test("ecb(arc4)");
 		break;
-
+#ifdef CONFIG_CRYPTO_MICHAEL_MIC
 	case 17:
 		ret += tcrypt_test("michael_mic");
 		break;
-
+#endif
 	case 18:
 		ret += tcrypt_test("crc32c");
 		break;
-
+#ifdef CONFIG_CRYPTO_TEA
 	case 19:
 		ret += tcrypt_test("ecb(tea)");
 		break;
@@ -1050,11 +1078,13 @@ static int do_test(int m)
 	case 20:
 		ret += tcrypt_test("ecb(xtea)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_KHAZAD
 	case 21:
 		ret += tcrypt_test("ecb(khazad)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_WP512
 	case 22:
 		ret += tcrypt_test("wp512");
 		break;
@@ -1066,105 +1096,132 @@ static int do_test(int m)
 	case 24:
 		ret += tcrypt_test("wp256");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_SERPENT
 	case 25:
 		ret += tcrypt_test("ecb(tnepres)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_ANUBIS
 	case 26:
 		ret += tcrypt_test("ecb(anubis)");
 		ret += tcrypt_test("cbc(anubis)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_TGR192
 	case 27:
 		ret += tcrypt_test("tgr192");
 		break;
 
 	case 28:
-
 		ret += tcrypt_test("tgr160");
 		break;
 
 	case 29:
 		ret += tcrypt_test("tgr128");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_TEA
 	case 30:
 		ret += tcrypt_test("ecb(xeta)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_FCRYPT
 	case 31:
 		ret += tcrypt_test("pcbc(fcrypt)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_CAMELLIA
 	case 32:
 		ret += tcrypt_test("ecb(camellia)");
 		ret += tcrypt_test("cbc(camellia)");
+		ret += tcrypt_test("ctr(camellia)");
+		ret += tcrypt_test("lrw(camellia)");
+		ret += tcrypt_test("xts(camellia)");
 		break;
+#endif
 	case 33:
 		ret += tcrypt_test("sha224");
 		break;
-
+#ifdef CONFIG_CRYPTO_SALSA20
 	case 34:
 		ret += tcrypt_test("salsa20");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_GCM
 	case 35:
 		ret += tcrypt_test("gcm(aes)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_LZO
 	case 36:
 		ret += tcrypt_test("lzo");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_CCM
 	case 37:
 		ret += tcrypt_test("ccm(aes)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_CTS
 	case 38:
 		ret += tcrypt_test("cts(cbc(aes))");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_RMD128
         case 39:
 		ret += tcrypt_test("rmd128");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_RMD160
         case 40:
 		ret += tcrypt_test("rmd160");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_RMD256
 	case 41:
 		ret += tcrypt_test("rmd256");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_RMD320
 	case 42:
 		ret += tcrypt_test("rmd320");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_SEED
 	case 43:
 		ret += tcrypt_test("ecb(seed)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_ZLIB
 	case 44:
 		ret += tcrypt_test("zlib");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_CCM
 	case 45:
 		ret += tcrypt_test("rfc4309(ccm(aes))");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_CAMELLIA
+	case 46:
+		ret += tcrypt_test("ghash");
+		break;
+#endif
+#ifdef CONFIG_CRYPTO_MD5
 	case 100:
 		ret += tcrypt_test("hmac(md5)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_SHA1
 	case 101:
 		ret += tcrypt_test("hmac(sha1)");
 		break;
-
+#endif
 	case 102:
 		ret += tcrypt_test("hmac(sha256)");
 		break;
-
+#ifdef CONFIG_CRYPTO_SHA512
 	case 103:
 		ret += tcrypt_test("hmac(sha384)");
 		break;
@@ -1172,15 +1229,16 @@ static int do_test(int m)
 	case 104:
 		ret += tcrypt_test("hmac(sha512)");
 		break;
-
+#endif
 	case 105:
 		ret += tcrypt_test("hmac(sha224)");
 		break;
-
+#ifdef CONFIG_CRYPTO_XCBC
 	case 106:
 		ret += tcrypt_test("xcbc(aes)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_RMD
 	case 107:
 		ret += tcrypt_test("hmac(rmd128)");
 		break;
@@ -1188,17 +1246,40 @@ static int do_test(int m)
 	case 108:
 		ret += tcrypt_test("hmac(rmd160)");
 		break;
-
+#endif
+#ifdef CONFIG_CRYPTO_VMAC
 	case 109:
 		ret += tcrypt_test("vmac(aes)");
+		break;
+#endif
+	case 110:
+		ret += tcrypt_test("hmac(crc32)");
 		break;
 
 	case 150:
 		ret += tcrypt_test("ansi_cprng");
 		break;
 
+#ifdef CONFIG_CRYPTO_GCM
 	case 151:
 		ret += tcrypt_test("rfc4106(gcm(aes))");
+		break;
+#endif
+
+	case 152:
+		ret += tcrypt_test("rfc4543(gcm(aes))");
+		break;
+
+	case 153:
+		ret += tcrypt_test("cmac(aes)");
+		break;
+
+	case 154:
+		ret += tcrypt_test("cmac(des3_ede)");
+		break;
+
+	case 155:
+		ret += tcrypt_test("authenc(hmac(sha1),cbc(aes))");
 		break;
 
 	case 200:
@@ -1339,6 +1420,49 @@ static int do_test(int m)
 				  speed_template_32_64);
 		break;
 
+	case 208:
+		test_cipher_speed("ecb(arc4)", ENCRYPT, sec, NULL, 0,
+				  speed_template_8);
+		break;
+
+	case 209:
+		test_cipher_speed("ecb(cast5)", ENCRYPT, sec, NULL, 0,
+				  speed_template_8_16);
+		test_cipher_speed("ecb(cast5)", DECRYPT, sec, NULL, 0,
+				  speed_template_8_16);
+		test_cipher_speed("cbc(cast5)", ENCRYPT, sec, NULL, 0,
+				  speed_template_8_16);
+		test_cipher_speed("cbc(cast5)", DECRYPT, sec, NULL, 0,
+				  speed_template_8_16);
+		test_cipher_speed("ctr(cast5)", ENCRYPT, sec, NULL, 0,
+				  speed_template_8_16);
+		test_cipher_speed("ctr(cast5)", DECRYPT, sec, NULL, 0,
+				  speed_template_8_16);
+		break;
+
+	case 210:
+		test_cipher_speed("ecb(cast6)", ENCRYPT, sec, NULL, 0,
+				  speed_template_16_32);
+		test_cipher_speed("ecb(cast6)", DECRYPT, sec, NULL, 0,
+				  speed_template_16_32);
+		test_cipher_speed("cbc(cast6)", ENCRYPT, sec, NULL, 0,
+				  speed_template_16_32);
+		test_cipher_speed("cbc(cast6)", DECRYPT, sec, NULL, 0,
+				  speed_template_16_32);
+		test_cipher_speed("ctr(cast6)", ENCRYPT, sec, NULL, 0,
+				  speed_template_16_32);
+		test_cipher_speed("ctr(cast6)", DECRYPT, sec, NULL, 0,
+				  speed_template_16_32);
+		test_cipher_speed("lrw(cast6)", ENCRYPT, sec, NULL, 0,
+				  speed_template_32_48);
+		test_cipher_speed("lrw(cast6)", DECRYPT, sec, NULL, 0,
+				  speed_template_32_48);
+		test_cipher_speed("xts(cast6)", ENCRYPT, sec, NULL, 0,
+				  speed_template_32_64);
+		test_cipher_speed("xts(cast6)", DECRYPT, sec, NULL, 0,
+				  speed_template_32_64);
+		break;
+
 	case 300:
 		/* fall through */
 
@@ -1412,6 +1536,10 @@ static int do_test(int m)
 
 	case 318:
 		test_hash_speed("ghash-generic", sec, hash_speed_template_16);
+		if (mode > 300 && mode < 400) break;
+
+	case 319:
+		test_hash_speed("crc32c", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
 
 	case 399:
@@ -1512,6 +1640,18 @@ static int do_test(int m)
 				   speed_template_16_24_32);
 		test_acipher_speed("ctr(aes)", DECRYPT, sec, NULL, 0,
 				   speed_template_16_24_32);
+		test_acipher_speed("cfb(aes)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("cfb(aes)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("ofb(aes)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("ofb(aes)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("rfc3686(ctr(aes))", ENCRYPT, sec, NULL, 0,
+				   speed_template_20_28_36);
+		test_acipher_speed("rfc3686(ctr(aes))", DECRYPT, sec, NULL, 0,
+				   speed_template_20_28_36);
 		break;
 
 	case 501:
@@ -1527,6 +1667,18 @@ static int do_test(int m)
 		test_acipher_speed("cbc(des3_ede)", DECRYPT, sec,
 				   des3_speed_template, DES3_SPEED_VECTORS,
 				   speed_template_24);
+		test_acipher_speed("cfb(des3_ede)", ENCRYPT, sec,
+				   des3_speed_template, DES3_SPEED_VECTORS,
+				   speed_template_24);
+		test_acipher_speed("cfb(des3_ede)", DECRYPT, sec,
+				   des3_speed_template, DES3_SPEED_VECTORS,
+				   speed_template_24);
+		test_acipher_speed("ofb(des3_ede)", ENCRYPT, sec,
+				   des3_speed_template, DES3_SPEED_VECTORS,
+				   speed_template_24);
+		test_acipher_speed("ofb(des3_ede)", DECRYPT, sec,
+				   des3_speed_template, DES3_SPEED_VECTORS,
+				   speed_template_24);
 		break;
 
 	case 502:
@@ -1537,6 +1689,14 @@ static int do_test(int m)
 		test_acipher_speed("cbc(des)", ENCRYPT, sec, NULL, 0,
 				   speed_template_8);
 		test_acipher_speed("cbc(des)", DECRYPT, sec, NULL, 0,
+				   speed_template_8);
+		test_acipher_speed("cfb(des)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8);
+		test_acipher_speed("cfb(des)", DECRYPT, sec, NULL, 0,
+				   speed_template_8);
+		test_acipher_speed("ofb(des)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8);
+		test_acipher_speed("ofb(des)", DECRYPT, sec, NULL, 0,
 				   speed_template_8);
 		break;
 
@@ -1563,6 +1723,110 @@ static int do_test(int m)
 				   speed_template_32_64);
 		break;
 
+	case 504:
+		test_acipher_speed("ecb(twofish)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("ecb(twofish)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("cbc(twofish)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("cbc(twofish)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("ctr(twofish)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("ctr(twofish)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_24_32);
+		test_acipher_speed("lrw(twofish)", ENCRYPT, sec, NULL, 0,
+				   speed_template_32_40_48);
+		test_acipher_speed("lrw(twofish)", DECRYPT, sec, NULL, 0,
+				   speed_template_32_40_48);
+		test_acipher_speed("xts(twofish)", ENCRYPT, sec, NULL, 0,
+				   speed_template_32_48_64);
+		test_acipher_speed("xts(twofish)", DECRYPT, sec, NULL, 0,
+				   speed_template_32_48_64);
+		break;
+
+	case 505:
+		test_acipher_speed("ecb(arc4)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8);
+		break;
+
+	case 506:
+		test_acipher_speed("ecb(cast5)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8_16);
+		test_acipher_speed("ecb(cast5)", DECRYPT, sec, NULL, 0,
+				   speed_template_8_16);
+		test_acipher_speed("cbc(cast5)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8_16);
+		test_acipher_speed("cbc(cast5)", DECRYPT, sec, NULL, 0,
+				   speed_template_8_16);
+		test_acipher_speed("ctr(cast5)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8_16);
+		test_acipher_speed("ctr(cast5)", DECRYPT, sec, NULL, 0,
+				   speed_template_8_16);
+		break;
+
+	case 507:
+		test_acipher_speed("ecb(cast6)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("ecb(cast6)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("cbc(cast6)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("cbc(cast6)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("ctr(cast6)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("ctr(cast6)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("lrw(cast6)", ENCRYPT, sec, NULL, 0,
+				   speed_template_32_48);
+		test_acipher_speed("lrw(cast6)", DECRYPT, sec, NULL, 0,
+				   speed_template_32_48);
+		test_acipher_speed("xts(cast6)", ENCRYPT, sec, NULL, 0,
+				   speed_template_32_64);
+		test_acipher_speed("xts(cast6)", DECRYPT, sec, NULL, 0,
+				   speed_template_32_64);
+		break;
+
+	case 508:
+		test_acipher_speed("ecb(camellia)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("ecb(camellia)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("cbc(camellia)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("cbc(camellia)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("ctr(camellia)", ENCRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("ctr(camellia)", DECRYPT, sec, NULL, 0,
+				   speed_template_16_32);
+		test_acipher_speed("lrw(camellia)", ENCRYPT, sec, NULL, 0,
+				   speed_template_32_48);
+		test_acipher_speed("lrw(camellia)", DECRYPT, sec, NULL, 0,
+				   speed_template_32_48);
+		test_acipher_speed("xts(camellia)", ENCRYPT, sec, NULL, 0,
+				   speed_template_32_64);
+		test_acipher_speed("xts(camellia)", DECRYPT, sec, NULL, 0,
+				   speed_template_32_64);
+		break;
+
+	case 509:
+		test_acipher_speed("ecb(blowfish)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8_32);
+		test_acipher_speed("ecb(blowfish)", DECRYPT, sec, NULL, 0,
+				   speed_template_8_32);
+		test_acipher_speed("cbc(blowfish)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8_32);
+		test_acipher_speed("cbc(blowfish)", DECRYPT, sec, NULL, 0,
+				   speed_template_8_32);
+		test_acipher_speed("ctr(blowfish)", ENCRYPT, sec, NULL, 0,
+				   speed_template_8_32);
+		test_acipher_speed("ctr(blowfish)", DECRYPT, sec, NULL, 0,
+				   speed_template_8_32);
+		break;
+
 	case 1000:
 		test_available();
 		break;
@@ -1587,7 +1851,9 @@ static int __init tcrypt_mod_init(void)
 		if (!tvmem[i])
 			goto err_free_tv;
 	}
-
+#ifdef CONFIG_CRYPTO_FIPS
+	testmgr_crypto_proc_init();
+#endif
 	if (alg)
 		err = do_alg_test(alg, type, mask);
 	else
@@ -1596,8 +1862,12 @@ static int __init tcrypt_mod_init(void)
 	if (err) {
 		printk(KERN_ERR "tcrypt: one or more tests failed!\n");
 		goto err_free_tv;
+#ifndef CONFIG_CRYPTO_FIPS
 	}
-
+#else
+	} else
+		do_integrity_check();
+#endif
 	/* We intentionaly return -EAGAIN to prevent keeping the module,
 	 * unless we're running in fips mode. It does all its work from
 	 * init() and doesn't offer any runtime functionality, but in
@@ -1628,10 +1898,11 @@ module_param(alg, charp, 0);
 module_param(type, uint, 0);
 module_param(mask, uint, 0);
 module_param(mode, int, 0);
+#ifdef SUPPORT_SPEED_TEST
 module_param(sec, uint, 0);
 MODULE_PARM_DESC(sec, "Length in seconds of speed tests "
 		      "(defaults to zero which uses CPU cycles instead)");
-
+#endif
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Quick & dirty crypto testing module");
 MODULE_AUTHOR("James Morris <jmorris@intercode.com.au>");

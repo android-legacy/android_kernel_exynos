@@ -75,6 +75,22 @@ obj-$(CONFIG_VIDEO_MT9P031) += mt9p031.o
 obj-$(CONFIG_VIDEO_MT9T001) += mt9t001.o
 obj-$(CONFIG_VIDEO_MT9V011) += mt9v011.o
 obj-$(CONFIG_VIDEO_MT9V032) += mt9v032.o
+ifeq ($(CONFIG_VIDEO_SAMSUNG_S5P_FIMC),y)
+obj-$(CONFIG_VIDEO_S5K4BA) += s5k4ba2.o
+obj-$(CONFIG_VIDEO_S5K4EA) += s5k4ea2.o
+endif
+ifeq ($(CONFIG_VIDEO_FIMC),y)
+obj-$(CONFIG_VIDEO_S5K4BA) += s5k4ba.o
+obj-$(CONFIG_VIDEO_S5K4EA) += s5k4ea.o
+endif
+obj-$(CONFIG_VIDEO_M5MO)	+= m5mo.o
+obj-$(CONFIG_VIDEO_M9MO)	+= m9mo.o
+ifeq ($(CONFIG_MACH_PX),y)
+obj-$(CONFIG_VIDEO_S5K5BAFX)	+= s5k5bafx-v2.o
+else
+obj-$(CONFIG_VIDEO_S5K5BAFX)	+= s5k5bafx-v2.o
+obj-$(CONFIG_VIDEO_S5K5BBGX)		+= s5k5bbgx.o
+endif
 obj-$(CONFIG_VIDEO_SR030PC30)	+= sr030pc30.o
 obj-$(CONFIG_VIDEO_NOON010PC30)	+= noon010pc30.o
 obj-$(CONFIG_VIDEO_M5MOLS)	+= m5mols/
@@ -134,8 +150,6 @@ obj-$(CONFIG_VIDEOBUF2_MEMOPS)		+= videobuf2-memops.o
 obj-$(CONFIG_VIDEOBUF2_VMALLOC)		+= videobuf2-vmalloc.o
 obj-$(CONFIG_VIDEOBUF2_DMA_CONTIG)	+= videobuf2-dma-contig.o
 obj-$(CONFIG_VIDEOBUF2_DMA_SG)		+= videobuf2-dma-sg.o
-obj-$(CONFIG_VIDEOBUF2_CMA_PHYS)	+= videobuf2-cma-phys.o
-obj-$(CONFIG_VIDEOBUF2_ION)		+= videobuf2-ion.o
 
 obj-$(CONFIG_V4L2_MEM2MEM_DEV) += v4l2-mem2mem.o
 
@@ -193,8 +207,6 @@ obj-$(CONFIG_VIDEO_SAMSUNG_S5P_MFC)	+= s5p-mfc/
 obj-$(CONFIG_VIDEO_SAMSUNG_S5P_TV)	+= s5p-tv/
 
 obj-$(CONFIG_VIDEO_SAMSUNG_S5P_G2D)	+= s5p-g2d/
-
-obj-$(CONFIG_VIDEO_EXYNOS)		+= exynos/
 
 obj-$(CONFIG_BLACKFIN)                  += blackfin/
 

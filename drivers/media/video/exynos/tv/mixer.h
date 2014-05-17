@@ -22,12 +22,13 @@
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
-#include <linux/videodev2_exynos_media.h>
 #include <media/v4l2-device.h>
 #include <media/videobuf2-core.h>
 #include <media/exynos_mc.h>
 
 #include "regs-mixer.h"
+
+#define INT_LOCK_TV 267200
 
 /** maximum number of output interfaces */
 #define MXR_MAX_OUTPUTS 2
@@ -112,14 +113,6 @@ struct mxr_crop {
 	unsigned int field;
 };
 
-/** stages of geometry operations */
-enum mxr_geometry_stage {
-	MXR_GEOMETRY_SINK,
-	MXR_GEOMETRY_COMPOSE,
-	MXR_GEOMETRY_CROP,
-	MXR_GEOMETRY_SOURCE,
-};
-
 /** description of transformation from source to destination image */
 struct mxr_geometry {
 	/** cropping for source image */
@@ -138,7 +131,6 @@ struct mxr_buffer {
 	struct vb2_buffer	vb;
 	/** node for layer's lists */
 	struct list_head	list;
-	struct list_head	wait;
 };
 
 /** TV graphic layer pipeline state */
@@ -214,12 +206,6 @@ struct mxr_layer {
 	spinlock_t enq_slock;
 	/** list for enqueued buffers */
 	struct list_head enq_list;
-
-	/** list for buffers waiting on a fence */
-	struct list_head fence_wait_list;
-	struct workqueue_struct *fence_wq;
-	struct work_struct fence_work;
-
 	/** buffer currently owned by hardware in temporary registers */
 	struct mxr_buffer *update_buf;
 	/** buffer currently owned by hardware in shadow registers */
@@ -343,6 +329,7 @@ struct sub_mxr_device {
 struct mxr_device {
 	/** master device */
 	struct device *dev;
+	struct device *bus_dev;
 	/** state of each output */
 	struct mxr_output *output[MXR_MAX_OUTPUTS];
 	/** number of registered outputs */
@@ -393,9 +380,6 @@ struct mxr_device {
 	struct mxr_layer_en layer_en;
 	/** frame packing flag **/
 	int frame_packing;
-
-	struct exynos5_bus_mif_handle *mif_handle;
-	struct exynos5_bus_int_handle *int_handle;
 };
 
 #if defined(CONFIG_VIDEOBUF2_CMA_PHYS)
@@ -467,7 +451,7 @@ int __devinit mxr_acquire_video(struct mxr_device *mdev,
 	struct mxr_output_conf *output_cont, int output_count);
 
 /** releasing common video resources */
-void mxr_release_video(struct mxr_device *mdev);
+void __devexit mxr_release_video(struct mxr_device *mdev);
 
 struct mxr_layer *mxr_graph_layer_create(struct mxr_device *mdev, int cur_mxr,
 	int idx, int nr);
@@ -527,8 +511,7 @@ void mxr_reg_set_layer_blend(struct mxr_device *mdev, int sub_mxr, int num,
 void mxr_reg_layer_alpha(struct mxr_device *mdev, int sub_mxr, int num, u32 a);
 void mxr_reg_set_pixel_blend(struct mxr_device *mdev, int sub_mxr, int num,
 		int en);
-void mxr_reg_set_colorkey(struct mxr_device *mdev, int sub_mxr,
-		int num, int en);
+void mxr_reg_set_colorkey(struct mxr_device *mdev, int sub_mxr, int num, int en);
 void mxr_reg_colorkey_val(struct mxr_device *mdev, int sub_mxr, int num, u32 v);
 irqreturn_t mxr_irq_handler(int irq, void *dev_data);
 void mxr_reg_s_output(struct mxr_device *mdev, int cookie);
@@ -536,7 +519,7 @@ void mxr_reg_streamon(struct mxr_device *mdev);
 void mxr_reg_streamoff(struct mxr_device *mdev);
 int mxr_reg_wait4vsync(struct mxr_device *mdev);
 void mxr_reg_set_mbus_fmt(struct mxr_device *mdev,
-	struct v4l2_mbus_framefmt *fmt, u32 dvi_mode);
+	struct v4l2_mbus_framefmt *fmt);
 void mxr_reg_local_path_clear(struct mxr_device *mdev);
 void mxr_reg_local_path_set(struct mxr_device *mdev, int mxr0_gsc, int mxr1_gsc,
 		u32 flags);
@@ -557,6 +540,5 @@ void mxr_reg_vp_format(struct mxr_device *mdev,
 	const struct mxr_format *fmt, const struct mxr_geometry *geo);
 #endif
 void mxr_reg_dump(struct mxr_device *mdev);
-void mxr_debugfs_init(struct mxr_device *mdev);
 
 #endif /* SAMSUNG_MIXER_H */

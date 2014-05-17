@@ -26,8 +26,7 @@ static void mxr_video_layer_release(struct mxr_layer *layer)
 	mxr_base_layer_release(layer);
 }
 
-static void mxr_video_stream_set(struct mxr_layer *layer, int en)
-{
+static void mxr_video_stream_set(struct mxr_layer *layer, int en) {
 	mxr_reg_video_layer_stream(layer->mdev, layer->idx, en);
 }
 

@@ -60,6 +60,8 @@ struct mmc_ios {
 #define MMC_TIMING_UHS_DDR50	5
 #define MMC_TIMING_MMC_HS200	6
 
+        unsigned char	ddr;			/* dual data rate used */
+
 #define MMC_SDR_MODE		0
 #define MMC_1_2V_DDR_MODE	1
 #define MMC_1_8V_DDR_MODE	2
@@ -144,8 +146,6 @@ struct device;
 struct mmc_async_req {
 	/* active mmc request */
 	struct mmc_request	*mrq;
-	struct mmc_request      *__mrq;
-	bool                    __cond;
 	/*
 	 * Check error status of completed mmc request.
 	 * Returns 0 if success otherwise non zero.
@@ -241,10 +241,6 @@ struct mmc_host {
 #define MMC_CAP2_BROKEN_VOLTAGE	(1 << 7)	/* Use the broken voltage */
 #define MMC_CAP2_DETECT_ON_ERR	(1 << 8)	/* On I/O err check card removal */
 #define MMC_CAP2_HC_ERASE_SZ	(1 << 9)	/* High-capacity erase size */
-#define MMC_CAP2_PACKED_RD	(1 << 10)	/* Allow packed read */
-#define MMC_CAP2_PACKED_WR	(1 << 11)	/* Allow packed write */
-#define MMC_CAP2_PACKED_CMD	(MMC_CAP2_PACKED_RD | \
-				 MMC_CAP2_PACKED_WR) /* Allow packed commands */
 
 	mmc_pm_flag_t		pm_caps;	/* supported pm features */
 	unsigned int        power_notify_type;

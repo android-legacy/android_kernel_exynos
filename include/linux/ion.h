@@ -45,10 +45,18 @@ enum ion_heap_type {
 #define ION_HEAP_SYSTEM_CONTIG_MASK	(1 << ION_HEAP_TYPE_SYSTEM_CONTIG)
 #define ION_HEAP_CARVEOUT_MASK		(1 << ION_HEAP_TYPE_CARVEOUT)
 
+#ifdef CONFIG_ION_EXYNOS
+#define ION_HEAP_EXYNOS_MASK		(1 << ION_HEAP_TYPE_EXYNOS)
+#define ION_HEAP_EXYNOS_CONTIG_MASK	(1 << ION_HEAP_TYPE_EXYNOS_CONTIG)
+#define ION_HEAP_EXYNOS_USER_MASK	(1 << ION_HEAP_TYPE_EXYNOS_USER)
+#define ION_EXYNOS_NONCACHE_MASK	(1 << (BITS_PER_LONG - 2))
+#define ION_EXYNOS_WRITE_MASK		(1 << (BITS_PER_LONG - 1))
+#endif
+
 #define ION_NUM_HEAP_IDS		sizeof(unsigned int) * 8
 
 /**
- * heap flags - the lower 16 bits are used by core ion, the upper 16
+ * allocation flags - the lower 16 bits are used by core ion, the upper 16
  * bits are reserved for use by the heaps themselves.
  */
 #define ION_FLAG_CACHED 1		/* mappings of this buffer should be
@@ -214,11 +222,19 @@ void *ion_map_kernel(struct ion_client *client, struct ion_handle *handle);
 void ion_unmap_kernel(struct ion_client *client, struct ion_handle *handle);
 
 /**
- * ion_share_dma_buf() - given an ion client, create a dma-buf fd
+ * ion_share_dma_buf() - share buffer as dma-buf
  * @client:	the client
  * @handle:	the handle
  */
-int ion_share_dma_buf(struct ion_client *client, struct ion_handle *handle);
+struct dma_buf *ion_share_dma_buf(struct ion_client *client,
+						struct ion_handle *handle);
+
+/**
+ * ion_share_dma_buf_fd() - given an ion client, create a dma-buf fd
+ * @client:	the client
+ * @handle:	the handle
+ */
+int ion_share_dma_buf_fd(struct ion_client *client, struct ion_handle *handle);
 
 /**
  * ion_import_dma_buf() - given an dma-buf fd from the ion exporter get handle
@@ -259,6 +275,19 @@ struct ion_allocation_data {
 	unsigned int flags;
 	struct ion_handle *handle;
 };
+
+#ifdef CONFIG_ION_EXYNOS
+struct ion_handle *ion_exynos_get_user_pages(struct ion_client *client,
+			unsigned long uvaddr, size_t len, unsigned int flags);
+#else
+#include <linux/err.h>
+static inline struct ion_handle *ion_exynos_get_user_pages(
+				struct ion_client *client, unsigned long uvaddr,
+				size_t len, unsigned int flags)
+{
+	return ERR_PTR(-ENOSYS);
+}
+#endif
 
 /**
  * struct ion_fd_data - metadata passed to/from userspace for a handle/fd pair

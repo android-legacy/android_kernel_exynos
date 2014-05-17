@@ -1,0 +1,8 @@
+arch/arm/mach-exynos/mach-u1.c: In function 'm5mo_flash_power':
+arch/arm/mach-exynos/mach-u1.c:828:1: warning: label 'torch_exit' defined but not used [-Wunused-label]
+arch/arm/mach-exynos/mach-u1.c: At top level:
+arch/arm/mach-exynos/mach-u1.c:3780:12: error: 'max8997_muic_usb_cb' undeclared here (not in a function)
+arch/arm/mach-exynos/mach-u1.c:4709:13: warning: 'sec_bat_initial_check' defined but not used [-Wunused-function]
+make[1]: *** [arch/arm/mach-exynos/mach-u1.o] Error 1
+make: *** [arch/arm/mach-exynos] Error 2
+make: *** Waiting for unfinished jobs....

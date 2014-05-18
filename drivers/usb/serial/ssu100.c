@@ -70,6 +70,7 @@ static struct usb_driver ssu100_driver = {
 	.id_table		       = id_table,
 	.suspend		       = usb_serial_suspend,
 	.resume			       = usb_serial_resume,
+	.no_dynamic_id		       = 1,
 	.supports_autosuspend	       = 1,
 };
 
@@ -231,7 +232,7 @@ static void ssu100_set_termios(struct tty_struct *tty,
 			       struct ktermios *old_termios)
 {
 	struct usb_device *dev = port->serial->dev;
-	struct ktermios *termios = tty->termios;
+	struct ktermios *termios = &tty->termios;
 	u16 baud, divisor, remainder;
 	unsigned int cflag = termios->c_cflag;
 	u16 urb_value = 0; /* will hold the new flags */
@@ -341,7 +342,7 @@ static int ssu100_open(struct tty_struct *tty, struct usb_serial_port *port)
 		dbg("%s - set uart failed", __func__);
 
 	if (tty)
-		ssu100_set_termios(tty, port, tty->termios);
+		ssu100_set_termios(tty, port, &tty->termios);
 
 	return usb_serial_generic_open(tty, port);
 }
@@ -532,16 +533,19 @@ static void ssu100_dtr_rts(struct usb_serial_port *port, int on)
 
 	dbg("%s\n", __func__);
 
-	/* Disable flow control */
-	if (!on) {
-		if (ssu100_setregister(dev, 0, UART_MCR, 0) < 0)
+	mutex_lock(&port->serial->disc_mutex);
+	if (!port->serial->disconnected) {
+		/* Disable flow control */
+		if (!on &&
+		    ssu100_setregister(dev, 0, UART_MCR, 0) < 0)
 			dev_err(&port->dev, "error from flowcontrol urb\n");
+		/* drop RTS and DTR */
+		if (on)
+			set_mctrl(dev, TIOCM_DTR | TIOCM_RTS);
+		else
+			clear_mctrl(dev, TIOCM_DTR | TIOCM_RTS);
 	}
-	/* drop RTS and DTR */
-	if (on)
-		set_mctrl(dev, TIOCM_DTR | TIOCM_RTS);
-	else
-		clear_mctrl(dev, TIOCM_DTR | TIOCM_RTS);
+	mutex_unlock(&port->serial->disc_mutex);
 }
 
 static void ssu100_update_msr(struct usb_serial_port *port, u8 msr)
@@ -673,6 +677,7 @@ static struct usb_serial_driver ssu100_device = {
 	},
 	.description	     = DRIVER_DESC,
 	.id_table	     = id_table,
+	.usb_driver	     = &ssu100_driver,
 	.num_ports	     = 1,
 	.open		     = ssu100_open,
 	.close		     = ssu100_close,
@@ -688,11 +693,41 @@ static struct usb_serial_driver ssu100_device = {
 	.disconnect          = usb_serial_generic_disconnect,
 };
 
-static struct usb_serial_driver * const serial_drivers[] = {
-	&ssu100_device, NULL
-};
+static int __init ssu100_init(void)
+{
+	int retval;
 
-module_usb_serial_driver(ssu100_driver, serial_drivers);
+	dbg("%s", __func__);
+
+	/* register with usb-serial */
+	retval = usb_serial_register(&ssu100_device);
+
+	if (retval)
+		goto failed_usb_sio_register;
+
+	retval = usb_register(&ssu100_driver);
+	if (retval)
+		goto failed_usb_register;
+
+	printk(KERN_INFO KBUILD_MODNAME ": " DRIVER_VERSION ":"
+	       DRIVER_DESC "\n");
+
+	return 0;
+
+failed_usb_register:
+	usb_serial_deregister(&ssu100_device);
+failed_usb_sio_register:
+	return retval;
+}
+
+static void __exit ssu100_exit(void)
+{
+	usb_deregister(&ssu100_driver);
+	usb_serial_deregister(&ssu100_device);
+}
+
+module_init(ssu100_init);
+module_exit(ssu100_exit);
 
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");

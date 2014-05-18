@@ -1084,7 +1084,7 @@ static int rndis_proc_show(struct seq_file *m, void *v)
 static ssize_t rndis_proc_write(struct file *file, const char __user *buffer,
 				size_t count, loff_t *ppos)
 {
-	rndis_params *p = PDE(file->f_path.dentry->d_inode)->data;
+	rndis_params *p = PDE_DATA(file_inode(file));
 	u32 speed = 0;
 	int i, fl_speed = 0;
 
@@ -1128,7 +1128,7 @@ static ssize_t rndis_proc_write(struct file *file, const char __user *buffer,
 
 static int rndis_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, rndis_proc_show, PDE(inode)->data);
+	return single_open(file, rndis_proc_show, PDE_DATA(inode));
 }
 
 static const struct file_operations rndis_proc_fops = {
@@ -1146,14 +1146,10 @@ static struct proc_dir_entry *rndis_connect_state [RNDIS_MAX_CONFIGS];
 
 #endif /* CONFIG_USB_GADGET_DEBUG_FILES */
 
-static bool rndis_initialized;
 
 int rndis_init(void)
 {
 	u8 i;
-
-	if (rndis_initialized)
-		return 0;
 
 	for (i = 0; i < RNDIS_MAX_CONFIGS; i++) {
 #ifdef	CONFIG_USB_GADGET_DEBUG_FILES
@@ -1181,7 +1177,6 @@ int rndis_init(void)
 		INIT_LIST_HEAD(&(rndis_per_dev_params[i].resp_queue));
 	}
 
-	rndis_initialized = true;
 	return 0;
 }
 
@@ -1190,13 +1185,7 @@ void rndis_exit(void)
 #ifdef CONFIG_USB_GADGET_DEBUG_FILES
 	u8 i;
 	char name[20];
-#endif
 
-	if (!rndis_initialized)
-		return;
-	rndis_initialized = false;
-
-#ifdef CONFIG_USB_GADGET_DEBUG_FILES
 	for (i = 0; i < RNDIS_MAX_CONFIGS; i++) {
 		sprintf(name, NAME_TEMPLATE, i);
 		remove_proc_entry(name, NULL);

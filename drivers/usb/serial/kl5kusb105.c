@@ -91,6 +91,7 @@ static struct usb_driver kl5kusb105d_driver = {
 	.probe =	usb_serial_probe,
 	.disconnect =	usb_serial_disconnect,
 	.id_table =	id_table,
+	.no_dynamic_id =	1,
 };
 
 static struct usb_serial_driver kl5kusb105d_device = {
@@ -99,6 +100,7 @@ static struct usb_serial_driver kl5kusb105d_device = {
 		.name =		"kl5kusb105d",
 	},
 	.description =		"KL5KUSB105D / PalmConnect",
+	.usb_driver =		&kl5kusb105d_driver,
 	.id_table =		id_table,
 	.num_ports =		1,
 	.bulk_out_size =	64,
@@ -114,10 +116,6 @@ static struct usb_serial_driver kl5kusb105d_device = {
 	.unthrottle =		usb_serial_generic_unthrottle,
 	.process_read_urb =	klsi_105_process_read_urb,
 	.prepare_write_buffer =	klsi_105_prepare_write_buffer,
-};
-
-static struct usb_serial_driver * const serial_drivers[] = {
-	&kl5kusb105d_device, NULL
 };
 
 struct klsi_105_port_settings {
@@ -322,12 +320,12 @@ static int  klsi_105_open(struct tty_struct *tty, struct usb_serial_port *port)
 
 	/* set up termios structure */
 	spin_lock_irqsave(&priv->lock, flags);
-	priv->termios.c_iflag = tty->termios->c_iflag;
-	priv->termios.c_oflag = tty->termios->c_oflag;
-	priv->termios.c_cflag = tty->termios->c_cflag;
-	priv->termios.c_lflag = tty->termios->c_lflag;
+	priv->termios.c_iflag = tty->termios.c_iflag;
+	priv->termios.c_oflag = tty->termios.c_oflag;
+	priv->termios.c_cflag = tty->termios.c_cflag;
+	priv->termios.c_lflag = tty->termios.c_lflag;
 	for (i = 0; i < NCCS; i++)
-		priv->termios.c_cc[i] = tty->termios->c_cc[i];
+		priv->termios.c_cc[i] = tty->termios.c_cc[i];
 	priv->cfg.pktlen   = cfg->pktlen;
 	priv->cfg.baudrate = cfg->baudrate;
 	priv->cfg.databits = cfg->databits;
@@ -458,9 +456,9 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 				 struct ktermios *old_termios)
 {
 	struct klsi_105_private *priv = usb_get_serial_port_data(port);
-	unsigned int iflag = tty->termios->c_iflag;
+	unsigned int iflag = tty->termios.c_iflag;
 	unsigned int old_iflag = old_termios->c_iflag;
-	unsigned int cflag = tty->termios->c_cflag;
+	unsigned int cflag = tty->termios.c_cflag;
 	unsigned int old_cflag = old_termios->c_cflag;
 	struct klsi_105_port_settings *cfg;
 	unsigned long flags;
@@ -573,7 +571,7 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 	if ((cflag & (PARENB|PARODD)) != (old_cflag & (PARENB|PARODD))
 	    || (cflag & CSTOPB) != (old_cflag & CSTOPB)) {
 		/* Not currently supported */
-		tty->termios->c_cflag &= ~(PARENB|PARODD|CSTOPB);
+		tty->termios.c_cflag &= ~(PARENB|PARODD|CSTOPB);
 #if 0
 		priv->last_lcr = 0;
 
@@ -600,7 +598,7 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 	    || (iflag & IXON) != (old_iflag & IXON)
 	    ||  (cflag & CRTSCTS) != (old_cflag & CRTSCTS)) {
 		/* Not currently supported */
-		tty->termios->c_cflag &= ~CRTSCTS;
+		tty->termios.c_cflag &= ~CRTSCTS;
 		/* Drop DTR/RTS if no flow control otherwise assert */
 #if 0
 		if ((iflag & IXOFF) || (iflag & IXON) || (cflag & CRTSCTS))
@@ -692,11 +690,40 @@ static int klsi_105_tiocmset(struct tty_struct *tty,
 	return retval;
 }
 
-module_usb_serial_driver(kl5kusb105d_driver, serial_drivers);
+
+static int __init klsi_105_init(void)
+{
+	int retval;
+	retval = usb_serial_register(&kl5kusb105d_device);
+	if (retval)
+		goto failed_usb_serial_register;
+	retval = usb_register(&kl5kusb105d_driver);
+	if (retval)
+		goto failed_usb_register;
+
+	printk(KERN_INFO KBUILD_MODNAME ": " DRIVER_VERSION ":"
+	       DRIVER_DESC "\n");
+	return 0;
+failed_usb_register:
+	usb_serial_deregister(&kl5kusb105d_device);
+failed_usb_serial_register:
+	return retval;
+}
+
+static void __exit klsi_105_exit(void)
+{
+	usb_deregister(&kl5kusb105d_driver);
+	usb_serial_deregister(&kl5kusb105d_device);
+}
+
+
+module_init(klsi_105_init);
+module_exit(klsi_105_exit);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
+
 
 module_param(debug, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "enable extensive debugging messages");

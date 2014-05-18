@@ -20,8 +20,7 @@
 #include <linux/cpufreq.h>
 #include <linux/suspend.h>
 #include <linux/reboot.h>
-#include <linux/module.h>
-#include <linux/pm_qos_params.h>
+#include <linux/pm_qos.h>
 
 #include <mach/map.h>
 #include <mach/regs-clock.h>
@@ -46,6 +45,7 @@ static struct cpufreq_freqs freqs;
 static bool exynos_cpufreq_disable;
 static bool exynos_cpufreq_lock_disable;
 static bool exynos_cpufreq_init_done;
+
 static DEFINE_MUTEX(set_freq_lock);
 static DEFINE_MUTEX(set_cpu_freq_lock);
 
@@ -91,6 +91,8 @@ static unsigned int exynos_get_safe_armvolt(unsigned int old_index, unsigned int
 
 	return safe_arm_volt;
 }
+
+unsigned int smooth_level = L8; /* L8 = 800Mhz */
 
 static int exynos_target(struct cpufreq_policy *policy,
 			  unsigned int target_freq,
@@ -139,8 +141,8 @@ static int exynos_target(struct cpufreq_policy *policy,
 
 #if defined(CONFIG_CPU_EXYNOS4210)
 	/* Do NOT step up max arm clock directly to reduce power consumption */
-	if (index == exynos_info->max_support_idx && old_index > 3)
-		index = 3;
+	if (index <= 4 && old_index > smooth_level && smooth_level >= L6)
+		index = smooth_level; /* L6 = 1000Mhz */
 #endif
 
 	freqs.new = freq_table[index].frequency;
@@ -252,6 +254,57 @@ int exynos_cpufreq_get_level(unsigned int freq, unsigned int *level)
 	return -EINVAL;
 }
 EXPORT_SYMBOL_GPL(exynos_cpufreq_get_level);
+
+int exynos_cpufreq_get_freq(unsigned int level, unsigned int *freq)
+{
+	struct cpufreq_frequency_table *table;
+	unsigned int i;
+
+	if (!exynos_cpufreq_init_done)
+		return -EINVAL;
+
+	table = cpufreq_frequency_get_table(0);
+	if (!table) {
+		pr_err("%s: Failed to get the cpufreq table\n", __func__);
+		return -EINVAL;
+	}
+
+	for (i = exynos_info->max_support_idx;
+		 (table[i].frequency != CPUFREQ_TABLE_END); i++) {
+		if (i == level) {
+			*freq = table[i].frequency;
+			return 0;
+		}
+	}
+
+	pr_err("%s: %u is an unsupported step\n", __func__, level);
+
+	return -EINVAL;
+}
+EXPORT_SYMBOL_GPL(exynos_cpufreq_get_freq);
+
+// Get the max frequency set
+// by simone201
+int exynos_cpufreq_get_maxfreq() {
+	struct cpufreq_policy *policy = cpufreq_cpu_get(0);
+
+	return policy->max;
+}
+
+// Get the min frequency set
+int exynos_cpufreq_get_minfreq() {
+	struct cpufreq_policy *policy = cpufreq_cpu_get(0);
+
+	return policy->min;
+}
+
+// Get current cpu freq
+// by simone201
+int exynos_cpufreq_get_curfreq() {
+	struct cpufreq_policy *policy = cpufreq_cpu_get(0);
+
+	return policy->cur;
+}
 
 atomic_t exynos_cpufreq_lock_count;
 
@@ -676,6 +729,7 @@ static int exynos_cpufreq_notifier_event(struct notifier_block *this,
 
 static struct notifier_block exynos_cpufreq_notifier = {
 	.notifier_call = exynos_cpufreq_notifier_event,
+	.priority = INT_MIN, /* done last - originally by arighi */
 };
 
 static int exynos_cpufreq_policy_notifier_call(struct notifier_block *this,
@@ -710,12 +764,14 @@ static struct notifier_block exynos_cpufreq_policy_notifier = {
 
 static int exynos_cpufreq_cpu_init(struct cpufreq_policy *policy)
 {
-	policy->cur = policy->min = policy->max = exynos_getspeed(policy->cpu);
+	policy->cur = policy->min = policy->max = 
+		policy->max_suspend = policy->min_suspend = 
+			exynos_getspeed(policy->cpu);
 
 	cpufreq_frequency_table_get_attr(exynos_info->freq_table, policy->cpu);
 
 	/* set the transition latency value */
-	policy->cpuinfo.transition_latency = 100000;
+	policy->cpuinfo.transition_latency = 60 * 1000;
 
 	/*
 	 * EXYNOS4 multi-core processors has 2 cores
@@ -730,7 +786,17 @@ static int exynos_cpufreq_cpu_init(struct cpufreq_policy *policy)
 		cpumask_setall(policy->cpus);
 	}
 
-	return cpufreq_frequency_table_cpuinfo(policy, exynos_info->freq_table);
+	/* Safe default startup limits */
+	policy->max_suspend = CPU_MAX_SUSPEND_FREQ;
+	policy->min_suspend = CPU_MIN_SUSPEND_FREQ;
+	cpufreq_frequency_table_cpuinfo(policy, exynos_info->freq_table);
+
+	/* Safe default startup limits */
+
+	policy->max = 1200000;
+	policy->min = 200000;
+
+	return 0;
 }
 
 static int exynos_cpufreq_reboot_notifier_call(struct notifier_block *this,
@@ -785,14 +851,13 @@ static int __init exynos_cpufreq_init(void)
 		goto err_vdd_arm;
 
 	if (exynos_info->set_freq == NULL) {
-		printk(KERN_ERR "%s: No set_freq function (ERR)\n",
-				__func__);
+		pr_err("%s: No set_freq function (ERR)\n", __func__);
 		goto err_vdd_arm;
 	}
 
 	arm_regulator = regulator_get(NULL, "vdd_arm");
 	if (IS_ERR(arm_regulator)) {
-		printk(KERN_ERR "failed to get resource %s\n", "vdd_arm");
+		pr_err("%s: failed to get resource vdd_arm\n", __func__);
 		goto err_vdd_arm;
 	}
 

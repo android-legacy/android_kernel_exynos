@@ -10,7 +10,9 @@
  * published by the Free Software Foundation.
  */
 #include <linux/version.h>
+#include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/dma-mapping.h>
 
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
@@ -26,6 +28,8 @@
 #if defined(CONFIG_S5P_SYSMMU_TV)
 #include <plat/sysmmu.h>
 #endif
+
+#include <linux/cma.h>
 
 #ifdef CONFIG_UMP_VCM_ALLOC
 #include "ump_kernel_interface.h"
@@ -324,6 +328,13 @@ struct s5p_tvout_v4l2_private_data {
 
 	atomic_t			tvif_use;
 	atomic_t			vo_use;
+
+#ifdef CONFIG_USE_TVOUT_CMA
+	void				*vir_addr;
+	dma_addr_t			dma_addr;
+#endif
+
+	struct device			*dev;
 };
 
 static struct s5p_tvout_v4l2_private_data s5p_tvout_v4l2_private = {
@@ -881,13 +892,24 @@ long s5p_tvout_tvif_ioctl(
 			goto end_tvif_ioctl;
 		}
 		for (i = 0; i < S5PTV_VP_BUFF_CNT; i++) {
-			s5ptv_vp_buff.vp_buffs[i].phy_base = buffs[i].phy_base;
-			s5ptv_vp_buff.vp_buffs[i].vir_base =
-				(unsigned int)phys_to_virt(buffs[i].phy_base);
-			s5ptv_vp_buff.vp_buffs[i].size = buffs[i].size;
-			tvout_dbg("s5ptv_vp_buff phy_base = 0x%x, vir_base = 0x%8x\n",
-				  s5ptv_vp_buff.vp_buffs[i].phy_base,
-				  s5ptv_vp_buff.vp_buffs[i].vir_base);
+			if (cma_is_registered_region(buffs[i].phy_base,
+							buffs[i].size)) {
+				s5ptv_vp_buff.vp_buffs[i].phy_base =
+							buffs[i].phy_base;
+				s5ptv_vp_buff.vp_buffs[i].vir_base =
+					(unsigned int)phys_to_virt(buffs[i].phy_base);
+				s5ptv_vp_buff.vp_buffs[i].size = buffs[i].size;
+				tvout_dbg("s5ptv_vp_buff phy_base = 0x%x, "
+						"vir_base = 0x%8x\n",
+					s5ptv_vp_buff.vp_buffs[i].phy_base,
+					s5ptv_vp_buff.vp_buffs[i].vir_base);
+			} else {
+				s5ptv_vp_buff.vp_buffs[i].phy_base = 0;
+				s5ptv_vp_buff.vp_buffs[i].vir_base = 0;
+				printk(KERN_ERR "Buffer for VP is not CMA region\n");
+				ret = -EINVAL;
+				goto end_tvif_ioctl;
+			}
 		}
 		goto end_tvif_ioctl;
 	}
@@ -929,18 +951,75 @@ end_tvif_ioctl:
 	return ret;
 }
 
+#ifdef CONFIG_USE_TVOUT_CMA
+static inline int alloc_vp_buff(void)
+{
+	int i;
+
+	s5p_tvout_v4l2_private.vir_addr = dma_alloc_coherent(
+				s5p_tvout_v4l2_private.dev,
+				S5PTV_VP_BUFF_CNT * S5PTV_VP_BUFF_SIZE,
+				&s5p_tvout_v4l2_private.dma_addr, 0);
+
+	if (!s5p_tvout_v4l2_private.vir_addr) {
+		printk(KERN_ERR "S5P-TVOUT: %s: dma_alloc_coherent returns "
+			"-ENOMEM\n", __func__);
+		return -ENOMEM;
+	}
+
+	printk(KERN_INFO "%s[%d] size 0x%x, vaddr 0x%x, base 0x%x\n",
+				__func__, __LINE__,
+				S5PTV_VP_BUFF_CNT * S5PTV_VP_BUFF_SIZE,
+				(int) s5p_tvout_v4l2_private.vir_addr,
+				(int) s5p_tvout_v4l2_private.dma_addr);
+
+	for (i = 0; i < S5PTV_VP_BUFF_CNT; i++) {
+		s5ptv_vp_buff.vp_buffs[i].phy_base =
+			(unsigned int) s5p_tvout_v4l2_private.dma_addr +
+					(i * S5PTV_VP_BUFF_SIZE);
+		s5ptv_vp_buff.vp_buffs[i].vir_base =
+			(unsigned int) s5p_tvout_v4l2_private.vir_addr +
+					(i * S5PTV_VP_BUFF_SIZE);
+	}
+
+	return 0;
+}
+
+static inline void free_vp_buff(void)
+{
+	dma_free_coherent(s5p_tvout_v4l2_private.dev,
+			S5PTV_VP_BUFF_CNT * S5PTV_VP_BUFF_SIZE,
+			s5p_tvout_v4l2_private.vir_addr,
+			s5p_tvout_v4l2_private.dma_addr);
+
+	printk(KERN_INFO "%s[%d] size 0x%x, vaddr 0x%x, base 0x%x\n",
+			__func__, __LINE__,
+			S5PTV_VP_BUFF_CNT * S5PTV_VP_BUFF_SIZE,
+			(int) s5p_tvout_v4l2_private.vir_addr,
+			(int) s5p_tvout_v4l2_private.dma_addr);
+}
+#else
+static inline int alloc_vp_buff(void) { return 0; }
+static inline void free_vp_buff(void) { }
+#endif
 
 static int s5p_tvout_tvif_open(struct file *file)
 {
+	int ret = 0;
+
 	mutex_lock(&s5p_tvout_tvif_mutex);
 
-	atomic_inc(&s5p_tvout_v4l2_private.tvif_use);
+	if (atomic_read(&s5p_tvout_v4l2_private.tvif_use) == 0)
+		ret = alloc_vp_buff();
+
+	if (!ret)
+		atomic_inc(&s5p_tvout_v4l2_private.tvif_use);
 
 	mutex_unlock(&s5p_tvout_tvif_mutex);
 
 	tvout_dbg("count=%d\n", atomic_read(&s5p_tvout_v4l2_private.tvif_use));
 
-	return 0;
+	return ret;
 }
 
 static int s5p_tvout_tvif_release(struct file *file)
@@ -958,6 +1037,8 @@ static int s5p_tvout_tvif_release(struct file *file)
 		s5p_tvout_mutex_lock();
 		s5p_tvif_ctrl_stop();
 		s5p_tvout_mutex_unlock();
+
+		free_vp_buff();
 	}
 
 	on_stop_process = false;
@@ -1134,6 +1215,25 @@ static int s5p_tvout_vo_s_fmt_type_private(
 		pix_fmt->height, color, field);
 #else
 	if (pix_fmt->priv) {
+		if (pix_fmt->pixelformat == V4L2_PIX_FMT_NV12T
+			|| pix_fmt->pixelformat == V4L2_PIX_FMT_NV21T) {
+			y_size = ALIGN(ALIGN(pix_fmt->width, 128) *
+				ALIGN(pix_fmt->height, 32), SZ_8K);
+			cbcr_size = ALIGN(ALIGN(pix_fmt->width, 128) *
+				ALIGN(pix_fmt->height >> 1, 32), SZ_8K);
+		} else {
+			y_size = pix_fmt->width * pix_fmt->height;
+			cbcr_size = pix_fmt->width * (pix_fmt->height >> 1);
+		}
+		if (!cma_is_registered_region((unsigned int)vparam.base_y,
+								y_size) ||
+			!cma_is_registered_region((unsigned int)vparam.base_c,
+								cbcr_size)) {
+			printk(KERN_ERR "Source image for VP is not"
+					"CMA region\n");
+			goto error_on_s_fmt_type_private;
+		}
+
 		copy_buff_idx =
 			s5ptv_vp_buff.
 				copy_buff_idxs[s5ptv_vp_buff.curr_copy_idx];
@@ -1144,19 +1244,6 @@ static int s5p_tvout_vo_s_fmt_type_private(
 				(u32) vparam.base_y, (u32) vparam.base_c,
 				pix_fmt->width, pix_fmt->height, color, field);
 		} else {
-			if (pix_fmt->pixelformat ==
-				V4L2_PIX_FMT_NV12T
-				|| pix_fmt->pixelformat == V4L2_PIX_FMT_NV21T) {
-				y_size = ALIGN(ALIGN(pix_fmt->width, 128) *
-					ALIGN(pix_fmt->height, 32), SZ_8K);
-				cbcr_size = ALIGN(ALIGN(pix_fmt->width, 128) *
-					ALIGN(pix_fmt->height >> 1, 32), SZ_8K);
-			} else {
-				y_size = pix_fmt->width * pix_fmt->height;
-				cbcr_size =
-					pix_fmt->width * (pix_fmt->height >> 1);
-			}
-
 			src_vir_y_addr = (unsigned int)phys_to_virt(
 				(unsigned long)vparam.base_y);
 			src_vir_cb_addr = (unsigned int)phys_to_virt(
@@ -1445,6 +1532,7 @@ int s5p_tvout_v4l2_constructor(struct platform_device *pdev)
 		}
 	}
 
+	s5p_tvout_v4l2_private.dev = &pdev->dev;
 	s5p_tvout_v4l2_init_private();
 
 	return 0;

@@ -28,7 +28,7 @@
 #include <plat/gpio-cfg.h>
 
 #include "sdhci-s3c.h"
-
+#include "sdhci.h"
 #define MAX_BUS_CLK	(4)
 
 /**
@@ -782,6 +782,8 @@ static int sdhci_s3c_suspend(struct platform_device *dev, pm_message_t pm)
 
 	return ret;
 }
+
+extern void sdhci_shutdown_host(struct sdhci_host *host);
 
 static void sdhci_s3c_shutdown(struct platform_device *dev)
 {

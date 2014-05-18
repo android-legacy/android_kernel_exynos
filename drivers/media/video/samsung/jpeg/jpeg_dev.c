@@ -27,6 +27,7 @@
 #include <linux/ioport.h>
 #include <linux/kmod.h>
 #include <linux/vmalloc.h>
+#include <linux/cma.h>
 #include <linux/time.h>
 #include <linux/clk.h>
 #include <linux/semaphore.h>
@@ -224,7 +225,7 @@ int jpeg_mmap(struct file *filp, struct vm_area_struct *vma)
 	ptr = (char *)jpeg_ctrl->mem.base;
 	start = 0;
 
-	vma->vm_flags |= VM_RESERVED | VM_IO;
+	vma->vm_flags |= VM_DONTEXPAND | VM_NODUMP | VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
 	while (size > 0) {
@@ -247,7 +248,14 @@ int jpeg_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	size = vma->vm_end - vma->vm_start;
 
-	vma->vm_flags |= VM_RESERVED | VM_IO;
+#if 0 /* if enabled, brake front camera pick */
+	if (!cma_is_registered_region(jpeg_ctrl->mem.base, size)) {
+		pr_err("[%s] handling non-cma region (%#x@%#x)is prohibited\n",
+			__func__, (unsigned int)size, jpeg_ctrl->mem.base);
+		return -EINVAL;
+	}
+#endif
+	vma->vm_flags |= VM_DONTEXPAND | VM_NODUMP | VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
 	page_frame_no = __phys_to_pfn(jpeg_ctrl->mem.base);

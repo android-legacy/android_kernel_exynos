@@ -740,6 +740,23 @@ static void emit_log_char(char c)
 		logged_chars++;
 }
 
+#ifdef CONFIG_SEC_LOG
+static void (*log_char_hook)(char c);
+
+void register_log_char_hook(void (*f) (char c))
+{
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&logbuf_lock, flags);
+
+	memcpy(log_buf, __log_buf, __LOG_BUF_LEN);
+
+	raw_spin_unlock_irqrestore(&logbuf_lock, flags);
+
+}
+EXPORT_SYMBOL(register_log_char_hook);
+#endif
+
 /*
  * Zap console related locks when oopsing. Only zap at most once
  * every 10 seconds, to leave time for slow consoles to print a

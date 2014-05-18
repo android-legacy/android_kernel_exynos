@@ -14,6 +14,7 @@
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/poll.h>
+#include <linux/module.h>
 
 #include <plat/tvout.h>
 #include <linux/delay.h>
@@ -87,10 +88,6 @@ static ssize_t s5p_hpd_read(struct file *file, char __user *buffer,
 static unsigned int s5p_hpd_poll(struct file *file, poll_table *wait);
 static long s5p_hpd_ioctl(struct file *file,
 			  unsigned int cmd, unsigned long arg);
-#ifdef CONFIG_SAMSUNG_WORKAROUND_HPD_GLANCE
-void mhl_hpd_handler(bool onoff);
-bool (*is_mhl_power_state_on)(void);
-#endif
 
 static const struct file_operations hpd_fops = {
 	.owner = THIS_MODULE,
@@ -384,6 +381,11 @@ static int s5p_hpd_irq_eint(int irq)
 		wake_up_interruptible(&hpd_struct.waitq);
 	} else {
 		HPDIFPRINTK("gpio is low\n");
+#if defined(CONFIG_SAMSUNG_WORKAROUND_HPD_GLANCE) &&\
+	!defined(CONFIG_SAMSUNG_MHL_9290) &&\
+	!defined(CONFIG_MHL_SII9234)
+		call_sched_mhl_hpd_handler();
+#endif
 		irq_set_irq_type(hpd_struct.irq_n, IRQ_TYPE_LEVEL_HIGH);
 		if (atomic_read(&hpd_struct.state) == HPD_LO)
 			return IRQ_HANDLED;
@@ -392,11 +394,6 @@ static int s5p_hpd_irq_eint(int irq)
 		atomic_set(&poll_state, 1);
 
 		last_hpd_state = HPD_LO;
-#ifdef	CONFIG_SAMSUNG_WORKAROUND_HPD_GLANCE
-		if (is_mhl_power_state_on != NULL)
-			if (!is_mhl_power_state_on())
-				mhl_hpd_handler(false);
-#endif
 
 #ifdef CONFIG_HDMI_CONTROLLED_BY_EXT_IC
 		schedule_delayed_work(&ext_ic_control_dwork ,
@@ -462,6 +459,11 @@ static int s5p_hpd_irq_hdmi(int irq)
 
 	} else if (flag & (1 << HDMI_IRQ_HPD_UNPLUG)) {
 		HPDIFPRINTK("HPD_LO\n");
+#if defined(CONFIG_SAMSUNG_WORKAROUND_HPD_GLANCE) &&\
+	!defined(CONFIG_SAMSUNG_MHL_9290) &&\
+	!defined(CONFIG_MHL_SII9234)
+		call_sched_mhl_hpd_handler();
+#endif
 
 		s5p_hdcp_stop();
 
@@ -473,11 +475,6 @@ static int s5p_hpd_irq_hdmi(int irq)
 		atomic_set(&poll_state, 1);
 
 		last_hpd_state = HPD_LO;
-#ifdef	CONFIG_SAMSUNG_WORKAROUND_HPD_GLANCE
-		if (is_mhl_power_state_on != NULL)
-			if (!is_mhl_power_state_on())
-				mhl_hpd_handler(false);
-#endif
 #ifdef CONFIG_HDMI_CONTROLLED_BY_EXT_IC
 		schedule_delayed_work(&ext_ic_control_dwork ,
 				msecs_to_jiffies(1000));
@@ -584,7 +581,7 @@ void mhl_hpd_handler(bool onoff)
 EXPORT_SYMBOL(mhl_hpd_handler);
 #endif
 
-static int __devinit s5p_hpd_probe(struct platform_device *pdev)
+static int s5p_hpd_probe(struct platform_device *pdev)
 {
 	struct s5p_platform_hpd *pdata;
 	int ret;
@@ -649,6 +646,10 @@ static int __devinit s5p_hpd_probe(struct platform_device *pdev)
 	}
 #ifdef	CONFIG_SAMSUNG_WORKAROUND_HPD_GLANCE
 	disable_irq(hpd_struct.irq_n);
+#	if !defined(CONFIG_SAMSUNG_MHL_9290) &&\
+		!defined(CONFIG_MHL_SII9234)
+		hpd_intr_state = s5p_hpd_get_status;
+#	endif
 #endif
 
 	s5p_hdmi_reg_intc_set_isr(s5p_hpd_irq_handler, (u8) HDMI_IRQ_HPD_PLUG);
@@ -664,7 +665,7 @@ static int __devinit s5p_hpd_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __devexit s5p_hpd_remove(struct platform_device *pdev)
+static int s5p_hpd_remove(struct platform_device *pdev)
 {
 #ifdef CONFIG_HDMI_SWITCH_HPD
 	switch_dev_unregister(&hpd_struct.hpd_switch);
@@ -696,7 +697,7 @@ static int s5p_hpd_resume(struct platform_device *dev)
 
 static struct platform_driver s5p_hpd_driver = {
 	.probe = s5p_hpd_probe,
-	.remove = __devexit_p(s5p_hpd_remove),
+	.remove = s5p_hpd_remove,
 	.suspend = s5p_hpd_suspend,
 	.resume = s5p_hpd_resume,
 	.driver = {

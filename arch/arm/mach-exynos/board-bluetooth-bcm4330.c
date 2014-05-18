@@ -115,7 +115,7 @@ static int bcm4330_bt_rfkill_set_power(void *data, bool blocked)
 		gpio_set_value(GPIO_BT_EN, 1);
 		msleep(20);
 		gpio_set_value(GPIO_BT_nRST, 1);
-		msleep(50);
+		msleep(100);
 	} else {
 		pr_info("[BT] Bluetooth Power Off.\n");
 		bt_is_running = 0;

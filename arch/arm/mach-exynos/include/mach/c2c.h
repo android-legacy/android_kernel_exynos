@@ -39,7 +39,8 @@ enum c2c_shrdmem_size {
 };
 
 struct exynos_c2c_platdata {
-	void (*setup_gpio)(enum c2c_buswidth rx_width, enum c2c_buswidth tx_width);
+	void (*setup_gpio)(enum c2c_buswidth rx_width,
+			enum c2c_buswidth tx_width);
 	void (*set_cprst)(void);
 	void (*clear_cprst)(void);
 	u32 (*get_c2c_state)(void);
@@ -57,12 +58,15 @@ struct exynos_c2c_platdata {
 	u32 clk_opp25;	/* clock of OPP25 */
 	enum c2c_opp_mode default_opp_mode;
 
-	void __iomem *c2c_sysreg;	/* System Register address for C2C */
+	/* System Register address for C2C */
+	void __iomem *c2c_sysreg;
+
 	char *c2c_clk;
 };
 
 void exynos_c2c_set_platdata(struct exynos_c2c_platdata *pd);
-extern void exynos_c2c_cfg_gpio(enum c2c_buswidth rx_width, enum c2c_buswidth tx_width);
+extern void exynos_c2c_cfg_gpio(enum c2c_buswidth rx_width,
+				enum c2c_buswidth tx_width);
 extern void exynos_c2c_set_cprst(void);
 extern void exynos_c2c_clear_cprst(void);
 #endif /*__ASM_PLAT_C2C_H */

@@ -33,6 +33,7 @@ enum android_alarm_type {
 	/* ANDROID_ALARM_TIME_CHANGE = 16 */
 };
 
+
 #ifdef __KERNEL__
 
 #include <linux/ktime.h>

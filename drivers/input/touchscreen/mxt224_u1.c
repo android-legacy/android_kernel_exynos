@@ -2142,7 +2142,7 @@ unsigned char test_node[5] = { 12, 20, 104, 188, 196 };
 uint16_t qt_refrence_node[209] = { 0 };
 uint16_t qt_delta_node[209] = { 0 };
 
-void diagnostic_chip(u8 mode)
+void __refdata diagnostic_chip(u8 mode)
 {
 	int error;
 	u16 t6_address = 0;
@@ -2890,7 +2890,7 @@ static ssize_t set_module_on_show(struct device *dev,
 	return count;
 }
 
-static ssize_t set_mxt_update_show(struct device *dev,
+static ssize_t __refdata set_mxt_update_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
 	struct mxt224_data *data = copy_data;

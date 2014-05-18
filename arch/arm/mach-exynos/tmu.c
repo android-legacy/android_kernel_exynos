@@ -68,7 +68,7 @@ static DEFINE_MUTEX(tmu_lock);
 
 
 #if (defined(CONFIG_CPU_EXYNOS4212) || defined(CONFIG_CPU_EXYNOS4412))
-#if defined(CONFIG_VIDEO_MALI400MP)
+#if defined(CONFIG_MALI400)
 extern int mali_voltage_lock_init(void);
 extern int mali_voltage_lock_push(int lock_vol);
 extern int mali_voltage_lock_pop(void);
@@ -503,7 +503,7 @@ static int exynos_tc_volt(struct s5p_tmu_info *info, int enable)
 		if (ret)
 			goto err_lock;
 #endif
-#if defined(CONFIG_VIDEO_MALI400MP)
+#if defined(CONFIG_MALI400)
 		ret = mali_voltage_lock_push(data->temp_compensate.g3d_volt);
 		if (ret < 0) {
 			pr_err("TMU: g3d_push error: %u uV\n",
@@ -518,7 +518,7 @@ static int exynos_tc_volt(struct s5p_tmu_info *info, int enable)
 		if (ret)
 			goto err_unlock;
 #endif
-#if defined(CONFIG_VIDEO_MALI400MP)
+#if defined(CONFIG_MALI400)
 		ret = mali_voltage_lock_pop();
 		if (ret < 0) {
 			pr_err("TMU: g3d_pop error\n");
@@ -710,7 +710,7 @@ static void exynos4_handler_tmu_state(struct work_struct *work)
 			panic("Emergency!!!! tripping is not treated!\n");
 			/* clear to prevent from interfupt by peindig bit */
 			__raw_writel(INTCLEARALL,
-				info->tmu_state + EXYNOS4_TMU_INTCLEAR);
+				(void __iomem *)info->tmu_state + EXYNOS4_TMU_INTCLEAR);
 			enable_irq(info->irq);
 			mutex_unlock(&tmu_lock);
 			return;
@@ -1024,7 +1024,7 @@ static irqreturn_t exynos4210_tmu_irq_handler(int irq, void *id)
 	disable_irq_nosync(irq);
 
 	status = __raw_readl(info->tmu_base + EXYNOS4_TMU_INTSTAT);
-	pr_info("EXYNOS4212_tmu interrupt: INTSTAT = 0x%08x\n", status);
+/*	pr_info("EXYNOS4212_tmu interrupt: INTSTAT = 0x%08x\n", status); */
 
 	/* To handle multiple interrupt pending,
 	 * interrupt by high temperature are serviced with priority.
@@ -1071,7 +1071,7 @@ static ssize_t s5p_tmu_show_curr_temp(struct device *dev,
 static DEVICE_ATTR(curr_temp, S_IRUGO, s5p_tmu_show_curr_temp, NULL);
 #endif
 
-static int __devinit s5p_tmu_probe(struct platform_device *pdev)
+static int s5p_tmu_probe(struct platform_device *pdev)
 {
 	struct s5p_tmu_info *info;
 	struct s5p_platform_tmu *pdata;
@@ -1250,7 +1250,7 @@ static int __devinit s5p_tmu_probe(struct platform_device *pdev)
 		if (exynos_tc_volt(info, 1) < 0)
 			pr_err("TMU: lock error!\n");
 	}
-#if defined(CONFIG_VIDEO_MALI400MP)
+#if defined(CONFIG_MALI400)
 	if (mali_voltage_lock_init())
 		pr_err("Failed to initialize mail voltage lock.\n");
 #endif
@@ -1295,7 +1295,7 @@ err_nomem:
 	return ret;
 }
 
-static int __devinit s5p_tmu_remove(struct platform_device *pdev)
+static int s5p_tmu_remove(struct platform_device *pdev)
 {
 	struct s5p_tmu_info *info = platform_get_drvdata(pdev);
 

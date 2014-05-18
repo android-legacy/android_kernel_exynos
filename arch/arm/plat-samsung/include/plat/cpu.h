@@ -233,6 +233,20 @@ extern struct sysdev_class s5pv210_sysclass;
 extern struct sysdev_class exynos4_sysclass;
 extern struct sysdev_class exynos5_sysclass;
 
+extern struct bus_type s3c2410_subsys;
+extern struct bus_type s3c2410a_subsys;
+extern struct bus_type s3c2412_subsys;
+extern struct bus_type s3c2416_subsys;
+extern struct bus_type s3c2440_subsys;
+extern struct bus_type s3c2442_subsys;
+extern struct bus_type s3c2443_subsys;
+extern struct bus_type s3c6410_subsys;
+extern struct bus_type s3c64xx_subsys;
+extern struct bus_type s5p64x0_subsys;
+extern struct bus_type s5pv210_subsys;
+extern struct bus_type exynos4_subsys;
+extern struct bus_type exynos5_subsys;
+
 extern void (*s5pc1xx_idle)(void);
 
 #endif

@@ -519,6 +519,12 @@ config EXYNOS_PM_HOTPLUG
 	help
 	  Dynamic CPU HOTLUG for EXYNOS series
 
+config ALUCARD_HOTPLUG
+        bool "Enable alucard-hotplug cpu hotplug driver"
+        default y
+        help
+         Generic Alucard-hotplug cpu hotplug driver for ARM SOCs
+
 choice
 	prompt "Dynamic CPU HOTPLUG Policy"
 	depends on EXYNOS_PM_HOTPLUG
@@ -541,6 +547,13 @@ config LEGACY_HOTPLUG_POLICY
 	  Enable to use pm hotplug, then it uses pm-hotplug.c file.
 	  Avg-load is calculated with only cpu utilization of cpu
 	  frequency at that time.
+
+config INTELLI_PLUG
+        bool "Enable intelli-plug cpu hotplug driver"
+        depends on EXYNOS_PM_HOTPLUG
+        depends on HOTPLUG_CPU
+        help
+          Generic Intelli-plug cpu hotplug driver for ARM SOCs
 
 config WITH_DVFS_POLICY
 	depends on EXYNOS4_CPUFREQ

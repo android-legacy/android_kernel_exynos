@@ -1433,25 +1433,6 @@ static void melfas_register_callback(void *cb)
 	pr_debug("[TSP] melfas_register_callback\n");
 }
 
-#ifdef CONFIG_LCD_FREQ_SWITCH
-struct tsp_lcd_callbacks *lcd_callbacks;
-struct tsp_lcd_callbacks {
-	void (*inform_lcd)(struct tsp_lcd_callbacks *, bool);
-};
-
-void tsp_lcd_infom(bool en)
-{
-	if (lcd_callbacks && lcd_callbacks->inform_lcd)
-		lcd_callbacks->inform_lcd(lcd_callbacks, en);
-}
-
-static void melfas_register_lcd_callback(void *cb)
-{
-	lcd_callbacks = cb;
-	pr_debug("[TSP] melfas_register_lcd_callback\n");
-}
-#endif
-
 static struct melfas_tsi_platform_data mms_ts_pdata = {
 	.max_x = 720,
 	.max_y = 1280,
@@ -1468,14 +1449,11 @@ static struct melfas_tsi_platform_data mms_ts_pdata = {
 	.power = melfas_power,
 	.mux_fw_flash = melfas_mux_fw_flash,
 	.is_vdd_on = is_melfas_vdd_on,
-	.config_fw_version = "N7100_Me_0910",
+	.config_fw_version = "N7100_Me_0813",
 /*	.set_touch_i2c		= melfas_set_touch_i2c, */
 /*	.set_touch_i2c_to_gpio	= melfas_set_touch_i2c_to_gpio, */
 	.lcd_type = melfas_get_lcdtype,
 	.register_cb = melfas_register_callback,
-#ifdef CONFIG_LCD_FREQ_SWITCH
-	.register_lcd_cb = melfas_register_lcd_callback,
-#endif
 };
 
 static struct i2c_board_info i2c_devs3[] = {
@@ -2214,7 +2192,7 @@ static struct melfas_tsi_platform_data mms_ts_pdata = {
 	.power = melfas_power,
 	.mux_fw_flash = melfas_mux_fw_flash,
 	.is_vdd_on = is_melfas_vdd_on,
-	.config_fw_version = "I9300_Me_0507",
+	.config_fw_version = "I9300_Me_0924",
 	.lcd_type = melfas_get_lcdtype,
 	.register_cb = melfas_register_callback,
 };
@@ -2269,6 +2247,8 @@ static void flexrate_work(struct work_struct *work)
 {
 	cpufreq_ondemand_flexrate_request(10000, 10);
 }
+static DECLARE_WORK(flex_work, flexrate_work);
+#endif
 
 #include <linux/pm_qos_params.h>
 static struct pm_qos_request_list busfreq_qos;
@@ -2277,13 +2257,14 @@ static void flexrate_qos_cancel(struct work_struct *work)
 	pm_qos_update_request(&busfreq_qos, 0);
 }
 
-static DECLARE_WORK(flex_work, flexrate_work);
 static DECLARE_DELAYED_WORK(busqos_work, flexrate_qos_cancel);
 
 void midas_tsp_request_qos(void *data)
 {
+#ifdef CONFIG_CPU_FREQ_GOV_ONDEMAND_FLEXRATE
 	if (!work_pending(&flex_work))
 		schedule_work_on(0, &flex_work);
+#endif
 
 	/* Guarantee that the bus runs at >= 266MHz */
 	if (!pm_qos_request_active(&busfreq_qos))
@@ -2297,5 +2278,3 @@ void midas_tsp_request_qos(void *data)
 	/* Cancel the QoS request after 1/10 sec */
 	schedule_delayed_work_on(0, &busqos_work, HZ / 5);
 }
-#endif
-

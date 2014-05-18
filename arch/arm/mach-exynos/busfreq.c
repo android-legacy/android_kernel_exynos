@@ -28,7 +28,7 @@
 #include <linux/suspend.h>
 #include <linux/reboot.h>
 #include <linux/clk.h>
-#include <linux/pm_qos_params.h>
+#include <linux/pm_qos.h>
 
 #include <asm/mach-types.h>
 
@@ -47,7 +47,7 @@
 
 #define MAX_LOAD		100
 #define DIVIDING_FACTOR		10000
-#define UP_THRESHOLD_DEFAULT	30
+#define UP_THRESHOLD_DEFAULT	23
 
 #define SYSFS_DEBUG_BUSFREQ
 
@@ -101,7 +101,7 @@ struct busfreq_table {
 	unsigned int clk_dmcdiv;
 };
 
-static struct busfreq_table exynos4_busfreq_table[] = {
+struct busfreq_table exynos4_busfreq_table[] = {
 	{LV_0, 400000, 1100000, 0, 0},
 	{LV_1, 267000, 1000000, 0, 0},
 #ifdef CONFIG_BUSFREQ_L2_160M

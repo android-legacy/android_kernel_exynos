@@ -22,6 +22,10 @@
  */
 #endif
 
+#ifndef __KERNEL__
+#define __KERNEL__
+#endif
+
 #ifdef __KERNEL__
 struct sii9234_platform_data {
 	u8 power_state;

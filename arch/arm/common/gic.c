@@ -782,3 +782,13 @@ int __init gic_of_init(struct device_node *node, struct device_node *parent)
 	return 0;
 }
 #endif
+
+void __cpuinit gic_enable_ppi(unsigned int irq)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	irq_set_status_flags(irq, IRQ_NOPROBE);
+	gic_unmask_irq(irq_get_irq_data(irq));
+	local_irq_restore(flags);
+}

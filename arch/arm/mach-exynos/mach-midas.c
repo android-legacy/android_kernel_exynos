@@ -43,11 +43,6 @@
 #if defined(CONFIG_CHARGER_MAX8922_U1)
 #include <linux/power/max8922_charger_u1.h>
 #endif
-
-#if defined(CONFIG_BT_BCM4334)
-#include <mach/board-bluetooth-bcm.h>
-#endif
-
 #ifdef CONFIG_STMPE811_ADC
 #include <linux/stmpe811-adc.h>
 #endif
@@ -193,9 +188,6 @@ static struct s3c2410_uartcfg smdk4212_uartcfgs[] __initdata = {
 		.ucon		= SMDK4212_UCON_DEFAULT,
 		.ulcon		= SMDK4212_ULCON_DEFAULT,
 		.ufcon		= SMDK4212_UFCON_DEFAULT,
-#if defined(CONFIG_BT_BCM4334)
-		.wake_peer = bcm_bt_lpm_exit_lpm_locked,
-#endif
 	},
 	[1] = {
 		.hwport		= 1,
@@ -835,10 +827,9 @@ static struct s3c_mshci_platdata exynos4_mshc_pdata __initdata = {
 				  MMC_CAP_UHS_DDR50 | MMC_CAP_CMD23,
 #ifdef CONFIG_MMC_MSHCI_ENABLE_CACHE
 	.host_caps2		= MMC_CAP2_ADAPT_PACKED | MMC_CAP2_PACKED_CMD |
-				  MMC_CAP2_CACHE_CTRL | MMC_CAP2_POWEROFF_NOTIFY,
+				  MMC_CAP2_CACHE_CTRL,
 #else
-	.host_caps2		= MMC_CAP2_ADAPT_PACKED | MMC_CAP2_PACKED_CMD |
-				  MMC_CAP2_POWEROFF_NOTIFY,
+	.host_caps2		= MMC_CAP2_ADAPT_PACKED | MMC_CAP2_PACKED_CMD,
 #endif
 #elif defined(CONFIG_EXYNOS4_MSHC_8BIT)
 	.max_width		= 8,
@@ -2105,6 +2096,52 @@ struct platform_device coresight_etm_device = {
 
 #endif
 
+#ifdef CONFIG_CPUPOWER
+#include <linux/power/cpupower.h>
+static unsigned int table_default_power[1] = {
+	1024
+};
+
+static struct cputopo_power default_cpu_power = {
+	.max  = 1,
+	.step = 1,
+	.table = table_default_power,
+};
+
+static unsigned int table_ca9_power[18] = {
+/* freq< 
+    200  300  400  500
+    600  700  800  900
+   1000 1100 1200 1300
+   1400 1500 1600 1700
+   1800 other*/
+	8192, 8192, 8192, 8192,
+	8192, 1024, 1024, 1024,
+	1024, 1024, 1024, 1024,
+	1024, 1024, 1024, 1024,
+	1024, 1024,
+};
+
+static struct cputopo_power CA9_cpu_power = {
+	.max  = 18,
+	.step = 100000,
+	.table = table_ca9_power,
+};
+
+/* This table list all possible cpu power configuration */
+static struct cputopo_power *midas_cpupower_data[2] = {
+	&default_cpu_power,
+	&CA9_cpu_power,
+};
+
+static struct platform_device midas_cpupower_dev = {
+	.name = "cpupower",
+	.dev = {
+		.platform_data = midas_cpupower_data,
+	},
+};
+#endif
+
 static struct platform_device *midas_devices[] __initdata = {
 #ifdef CONFIG_SEC_WATCHDOG_RESET
 	&watchdog_reset_device,
@@ -2372,6 +2409,9 @@ static struct platform_device *midas_devices[] __initdata = {
 	&coresight_tpiu_device,
 	&coresight_funnel_device,
 	&coresight_etm_device,
+#endif
+#ifdef CONFIG_CPUPOWER
+	&midas_cpupower_dev,
 #endif
 };
 
@@ -3424,18 +3464,6 @@ static void __init exynos4_reserve(void)
 		CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC1 * SZ_1K, 0x65800000, 0);
 	if (ret != 0)
 		panic("alloc failed for FIMC1\n");
-	else {
-		static struct cma_region fimc_reg = {
-			.name = "fimc1",
-			.size = CONFIG_VIDEO_SAMSUNG_MEMSIZE_FIMC1 * SZ_1K,
-			.start = 0x65800000,
-			.reserved = 1,
-		};
-
-		if (cma_early_region_register(&fimc_reg))
-			pr_err("S5P/CMA: Failed to register '%s'\n",
-						fimc_reg.name);
-	}
 #endif
 
 #if defined(CONFIG_USE_MFC_CMA) && defined(CONFIG_MACH_M0)

@@ -230,6 +230,7 @@ void s3c_csis_start(int csis_id, int lanes, int settle, int align, int width, \
 {
 	struct platform_device *pdev = NULL;
 	struct s3c_platform_csis *pdata = NULL;
+	int i;
 
 	printk(KERN_INFO "csis width = %d, height = %d\n", width, height);
 
@@ -314,9 +315,22 @@ static irqreturn_t s3c_csis_irq(int irq, void *dev_id)
 		}
 	}
 #endif
+
+	if (unlikely(cfg & S3C_CSIS_INTSRC_ERR)) {
+		err("csis error interrupt occured : %#x\n", cfg);
+	}
+
+	/* Error Handling. If there is an error, we will reset camera sensor as if electric shock comes to the sensor,*/
+	if (unlikely(cfg & S3C_CSIS_INTSRC_ERR_LOST_FS) ||
+		unlikely(cfg & S3C_CSIS_INTSRC_ERR_LOST_FE)) {
+		err("csis error interrupt occured FS | FE = 0x%x\n", cfg);
+#ifndef CONFIG_MACH_U1
+		s3c_csis_stop(pdev->id);
+#endif
+	}
+
 	if(s3c_csis[pdev->id]->pktdata_enable) {
 		if (unlikely(cfg & S3C_CSIS_INTSRC_NON_IMAGE_DATA)) {
-
 			if (cfg & S3C_CSIS_INTSRC_EVEN_BEFORE) {
 				/* printk(KERN_INFO "S3C_CSIS_INTSRC_EVEN_BEFORE\n"); */
 				memcpy_fromio(s3c_csis[pdev->id]->bufs.pktdata,

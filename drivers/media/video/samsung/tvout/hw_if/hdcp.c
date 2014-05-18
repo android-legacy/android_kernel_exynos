@@ -13,6 +13,7 @@
 #include <linux/io.h>
 #include <linux/err.h>
 #include <linux/delay.h>
+#include <linux/module.h>
 #include <linux/sched.h>
 
 #include <mach/regs-hdmi.h>
@@ -240,7 +241,7 @@ static ssize_t sysfs_hdcp_ddc_i2c_num_show(struct class *class,
 
 static CLASS_ATTR(ddc_i2c_num, 0664 , sysfs_hdcp_ddc_i2c_num_show, NULL);
 
-static int __devinit s5p_ddc_probe(struct i2c_client *client,
+static int s5p_ddc_probe(struct i2c_client *client,
 			const struct i2c_device_id *dev_id)
 {
 	int ret = 0;
@@ -303,7 +304,7 @@ static struct i2c_driver ddc_driver = {
 	},
 	.id_table	= ddc_idtable,
 	.probe		= s5p_ddc_probe,
-	.remove		= __devexit_p(s5p_ddc_remove),
+	.remove		= s5p_ddc_remove,
 	.suspend	= s5p_ddc_suspend,
 	.resume		= s5p_ddc_resume,
 };
@@ -799,7 +800,9 @@ int s5p_hdcp_stop(void)
 
 	return 0;
 }
-
+#ifdef CONFIG_SAMSUNG_MHL_9290
+extern void sii9234_tmds_reset(void);
+#endif
 int s5p_hdcp_start(void)
 {
 	u32  sfr_val;
@@ -828,7 +831,9 @@ int s5p_hdcp_start(void)
 	s5p_hdmi_reg_intc_enable(HDMI_IRQ_HDCP, 1);
 
 	hdcp_info.hdcp_enable = 1;
-
+#ifdef CONFIG_SAMSUNG_MHL_9290
+	sii9234_tmds_reset();
+#endif
 	return 0;
 }
 

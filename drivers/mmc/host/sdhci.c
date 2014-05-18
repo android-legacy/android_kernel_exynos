@@ -2423,6 +2423,14 @@ int sdhci_suspend_host(struct sdhci_host *host)
 
 EXPORT_SYMBOL_GPL(sdhci_suspend_host);
 
+void sdhci_shutdown_host(struct sdhci_host *host)
+{
+	sdhci_disable_card_detection(host);
+
+	free_irq(host->irq, host);
+}
+EXPORT_SYMBOL_GPL(sdhci_shutdown_host);
+
 int sdhci_resume_host(struct sdhci_host *host)
 {
 	int ret;

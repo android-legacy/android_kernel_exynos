@@ -374,6 +374,8 @@ int fimc_hwget_overflow_state(struct fimc_control *ctrl)
 	flag = S3C_CISTATUS_OVFIY | S3C_CISTATUS_OVFICB | S3C_CISTATUS_OVFICR;
 
 	if (status & flag) {
+		printk(KERN_INFO "FIMC%d overflow has occured status 0x%x\n",
+				ctrl->id, status);
 		cfg = readl(ctrl->regs + S3C_CIWDOFST);
 		cfg |= (S3C_CIWDOFST_CLROVFIY | S3C_CIWDOFST_CLROVFICB |
 			S3C_CIWDOFST_CLROVFICR);
@@ -1273,7 +1275,7 @@ void fimc_wait_disable_capture(struct fimc_control *ctrl)
 			break;
 		msleep(5);
 	}
-	fimc_info2("IMGCPTEN: Wait time = %d ms\n"	\
+	fimc_err("IMGCPTEN: Wait time = %d ms\n"	\
 		, jiffies_to_msecs(jiffies - timeo + 20));
 	return;
 }

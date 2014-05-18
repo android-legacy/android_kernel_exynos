@@ -1635,7 +1635,7 @@ int fimc_outdev_overlay_buf(struct file *filp,
 		ctx->overlay.req_idx = i;
 		buf->size[i] = ctx->dst[i].length[0];
 		buf->phy_addr[i] = ctx->dst[i].base[0];
-		buf->vir_addr[i] = do_mmap(filp, 0, buf->size[i],
+		buf->vir_addr[i] = vm_mmap(filp, 0, buf->size[i],
 					PROT_READ|PROT_WRITE, MAP_SHARED, 0);
 		if (buf->vir_addr[i] == -EINVAL) {
 			fimc_err("%s: fail\n", __func__);
@@ -2816,7 +2816,7 @@ int fimc_qbuf_output(void *fh, struct v4l2_buffer *b)
 		return -EINVAL;
 	}
 	if (buf->base[FIMC_ADDR_CB] != 0 && cb_size != 0 &&
-			!cma_is_registered_region(buf->base[FIMC_ADDR_CB], cb_size)) {
+				!cma_is_registered_region(buf->base[FIMC_ADDR_CB], cb_size)) {
 		fimc_err("%s: CB address is not CMA region 0x%x, %d \n",
 				__func__, buf->base[FIMC_ADDR_CB], cb_size);
 		return -EINVAL;
@@ -2904,7 +2904,8 @@ int fimc_qbuf_output(void *fh, struct v4l2_buffer *b)
 		if (ctrl->regs == NULL) {
 			fimc_err("%s:FIMC%d power is off!!! (ctx=%d)\n",
 				 __func__, ctrl->id, ctx_id);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto err_routine;
 		}
 
 		ctx = &ctrl->out->ctx[ctx_num];

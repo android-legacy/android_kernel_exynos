@@ -1,6 +1,6 @@
 #include <linux/device.h>
+#include <linux/export.h>
 #include <linux/err.h>
-#include <linux/module.h>
 
 struct class *sec_class;
 EXPORT_SYMBOL(sec_class);
@@ -16,8 +16,4 @@ static int __init midas_class_create(void)
 	return 0;
 }
 
-#ifdef CONFIG_FAST_RESUME
-beforeresume_initcall(midas_class_create);
-#else
 subsys_initcall(midas_class_create);
-#endif

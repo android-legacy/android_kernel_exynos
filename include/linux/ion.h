@@ -247,6 +247,47 @@ int ion_share_dma_buf_fd(struct ion_client *client, struct ion_handle *handle);
  */
 struct ion_handle *ion_import_dma_buf(struct ion_client *client, int fd);
 
+/**
+ * ion_share_fd() - given a handle, obtain a buffer(fd) to pass to userspace
+ * @client:     the client
+ * @handle:     the handle to share
+ *
+ * Given a handle, return a fd of a buffer which can be passed to userspace.
+ * Should be passed into userspace or ion_import_fd to obtain a new handle for
+ * this buffer.
+ */
+int ion_share_fd(struct ion_client *client, struct ion_handle *handle);
+
+/**
+ * ion_import_fd() - given an fd obtained via ION_IOC_SHARE ioctl, import it
+ * @client:     this blocks client
+ * @fd:         the fd
+ *
+ * A helper function for drivers that will be recieving ion buffers shared
+ * with them from userspace.  These buffers are represented by a file
+ * descriptor obtained as the return from the ION_IOC_SHARE ioctl.
+ * This function coverts that fd into the underlying buffer, and returns
+ * the handle to use to refer to it further.
+ */
+struct ion_handle *ion_import_fd(struct ion_client *client, int fd);
+
+/**
+ * ion_map_dma - create a dma mapping for a given handle
+ * @client:     the client
+ * @handle:     handle to map
+ *
+ * Return an sglist describing the given handle
+ */
+struct scatterlist *ion_map_dma(struct ion_client *client,
+                                struct ion_handle *handle);
+
+/**
+ * ion_unmap_dma() - destroy a dma mapping for a handle
+ * @client:     the client
+ * @handle:     handle to unmap
+ */
+void ion_unmap_dma(struct ion_client *client, struct ion_handle *handle);
+
 #endif /* __KERNEL__ */
 
 /**

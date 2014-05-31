@@ -464,7 +464,7 @@ static int parport_prologue(struct parport *pp)
 		return -1;
 	}
 	mos_parport->msg_pending = true;   /* synch usb call pending */
-	INIT_COMPLETION(mos_parport->syncmsg_compl);
+	reinit_completion(&mos_parport->syncmsg_compl);
 	spin_unlock(&release_lock);
 
 	mutex_lock(&mos_parport->serial->disc_mutex);
@@ -957,7 +957,14 @@ static void mos7720_bulk_in_callback(struct urb *urb)
 	}
 	tty_kref_put(tty);
 
+	if (!port->read_urb) {
+		dbg("URB KILLED !!!");
+		return;
+	}
+
 	if (port->read_urb->status != -EINPROGRESS) {
+		port->read_urb->dev = port->serial->dev;
+
 		retval = usb_submit_urb(port->read_urb, GFP_ATOMIC);
 		if (retval)
 			dbg("usb_submit_urb(read bulk) failed, retval = %d",
@@ -1025,6 +1032,7 @@ static int mos77xx_calc_num_ports(struct usb_serial *serial)
 static int mos7720_open(struct tty_struct *tty, struct usb_serial_port *port)
 {
 	struct usb_serial *serial;
+	struct usb_serial_port *port0;
 	struct urb *urb;
 	struct moschip_port *mos7720_port;
 	int response;
@@ -1038,6 +1046,8 @@ static int mos7720_open(struct tty_struct *tty, struct usb_serial_port *port)
 	mos7720_port = usb_get_serial_port_data(port);
 	if (mos7720_port == NULL)
 		return -ENODEV;
+
+	port0 = serial->port[0];
 
 	usb_clear_halt(serial->dev, port->write_urb->pipe);
 	usb_clear_halt(serial->dev, port->read_urb->pipe);
@@ -1312,7 +1322,7 @@ static int mos7720_write(struct tty_struct *tty, struct usb_serial_port *port,
 		urb->transfer_buffer = kmalloc(URB_TRANSFER_BUFFER_SIZE,
 					       GFP_KERNEL);
 		if (urb->transfer_buffer == NULL) {
-			dev_err_console(port, "%s no more kernel memory...\n",
+			dev_err(&port->dev, "%s no more kernel memory...\n",
 				__func__);
 			goto exit;
 		}
@@ -1333,7 +1343,7 @@ static int mos7720_write(struct tty_struct *tty, struct usb_serial_port *port,
 	/* send it down the pipe */
 	status = usb_submit_urb(urb, GFP_ATOMIC);
 	if (status) {
-		dev_err_console(port, "%s - usb_submit_urb(write bulk) failed "
+		dev_err(&port->dev, "%s - usb_submit_urb(write bulk) failed "
 			"with status = %d\n", __func__, status);
 		bytes_sent = status;
 		goto exit;
@@ -1373,7 +1383,7 @@ static void mos7720_throttle(struct tty_struct *tty)
 	}
 
 	/* if we are implementing RTS/CTS, toggle that line */
-	if (tty->termios->c_cflag & CRTSCTS) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		mos7720_port->shadowMCR &= ~UART_MCR_RTS;
 		write_mos_reg(port->serial, port->number - port->serial->minor,
 			      MCR, mos7720_port->shadowMCR);
@@ -1407,7 +1417,7 @@ static void mos7720_unthrottle(struct tty_struct *tty)
 	}
 
 	/* if we are implementing RTS/CTS, toggle that line */
-	if (tty->termios->c_cflag & CRTSCTS) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		mos7720_port->shadowMCR |= UART_MCR_RTS;
 		write_mos_reg(port->serial, port->number - port->serial->minor,
 			      MCR, mos7720_port->shadowMCR);
@@ -1628,8 +1638,8 @@ static void change_port_settings(struct tty_struct *tty,
 	lStop = 0x00;	/* 1 stop bit */
 	lParity = 0x00;	/* No parity */
 
-	cflag = tty->termios->c_cflag;
-	iflag = tty->termios->c_iflag;
+	cflag = tty->termios.c_cflag;
+	iflag = tty->termios.c_iflag;
 
 	/* Change the number of bits */
 	switch (cflag & CSIZE) {
@@ -1743,6 +1753,8 @@ static void change_port_settings(struct tty_struct *tty,
 	write_mos_reg(serial, port_number, IER, 0x0c);
 
 	if (port->read_urb->status != -EINPROGRESS) {
+		port->read_urb->dev = serial->dev;
+
 		status = usb_submit_urb(port->read_urb, GFP_ATOMIC);
 		if (status)
 			dbg("usb_submit_urb(read bulk) failed, status = %d",
@@ -1777,11 +1789,11 @@ static void mos7720_set_termios(struct tty_struct *tty,
 
 	dbg("%s\n", "setting termios - ASPIRE");
 
-	cflag = tty->termios->c_cflag;
+	cflag = tty->termios.c_cflag;
 
 	dbg("%s - cflag %08x iflag %08x", __func__,
-	    tty->termios->c_cflag,
-	    RELEVANT_IFLAG(tty->termios->c_iflag));
+	    tty->termios.c_cflag,
+	    RELEVANT_IFLAG(tty->termios.c_iflag));
 
 	dbg("%s - old cflag %08x old iflag %08x", __func__,
 	    old_termios->c_cflag,
@@ -1792,7 +1804,13 @@ static void mos7720_set_termios(struct tty_struct *tty,
 	/* change the port settings to the new ones specified */
 	change_port_settings(tty, mos7720_port, old_termios);
 
+	if (!port->read_urb) {
+		dbg("%s", "URB KILLED !!!!!");
+		return;
+	}
+
 	if (port->read_urb->status != -EINPROGRESS) {
+		port->read_urb->dev = serial->dev;
 		status = usb_submit_urb(port->read_urb, GFP_ATOMIC);
 		if (status)
 			dbg("usb_submit_urb(read bulk) failed, status = %d",
@@ -2187,6 +2205,7 @@ static struct usb_driver usb_driver = {
 	.probe =	usb_serial_probe,
 	.disconnect =	usb_serial_disconnect,
 	.id_table =	moschip_port_id_table,
+	.no_dynamic_id =	1,
 };
 
 static struct usb_serial_driver moschip7720_2port_driver = {
@@ -2195,6 +2214,7 @@ static struct usb_serial_driver moschip7720_2port_driver = {
 		.name =		"moschip7720",
 	},
 	.description		= "Moschip 2 port adapter",
+	.usb_driver		= &usb_driver,
 	.id_table		= moschip_port_id_table,
 	.calc_num_ports		= mos77xx_calc_num_ports,
 	.open			= mos7720_open,
@@ -2217,12 +2237,44 @@ static struct usb_serial_driver moschip7720_2port_driver = {
 	.read_int_callback	= NULL  /* dynamically assigned in probe() */
 };
 
-static struct usb_serial_driver * const serial_drivers[] = {
-	&moschip7720_2port_driver, NULL
-};
+static int __init moschip7720_init(void)
+{
+	int retval;
 
-module_usb_serial_driver(usb_driver, serial_drivers);
+	dbg("%s: Entering ..........", __func__);
 
+	/* Register with the usb serial */
+	retval = usb_serial_register(&moschip7720_2port_driver);
+	if (retval)
+		goto failed_port_device_register;
+
+	printk(KERN_INFO KBUILD_MODNAME ": " DRIVER_VERSION ":"
+	       DRIVER_DESC "\n");
+
+	/* Register with the usb */
+	retval = usb_register(&usb_driver);
+	if (retval)
+		goto failed_usb_register;
+
+	return 0;
+
+failed_usb_register:
+	usb_serial_deregister(&moschip7720_2port_driver);
+
+failed_port_device_register:
+	return retval;
+}
+
+static void __exit moschip7720_exit(void)
+{
+	usb_deregister(&usb_driver);
+	usb_serial_deregister(&moschip7720_2port_driver);
+}
+
+module_init(moschip7720_init);
+module_exit(moschip7720_exit);
+
+/* Module information */
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");

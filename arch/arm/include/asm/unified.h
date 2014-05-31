@@ -49,8 +49,8 @@
 #define THUMB(x...)
 #ifdef __ASSEMBLY__
 #define W(instr)	instr
-#define BSYM(sym)	sym
 #endif
+#define BSYM(sym)       sym
 
 #endif	/* CONFIG_THUMB2_KERNEL */
 

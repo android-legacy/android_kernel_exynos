@@ -38,7 +38,11 @@ struct clk clk_ext_xtal_mux = {
 struct clk clk_xusbxti = {
 	.name		= "xusbxti",
 	.id		= -1,
-	.rate		= 24000000,
+};
+
+struct clk clk_xxti = {
+	.name		= "xxti",
+	.id		= -1,
 };
 
 struct clk s5p_clk_27m = {
@@ -62,20 +66,6 @@ struct clk clk_fout_apll = {
 	.id		= -1,
 };
 
-/* BPLL clock output */
-
-struct clk clk_fout_bpll = {
-	.name		= "fout_bpll",
-	.id		= -1,
-};
-
-/* CPLL clock output */
-
-struct clk clk_fout_cpll = {
-	.name		= "fout_cpll",
-	.id		= -1,
-};
-
 /* MPLL clock output
  * No need .ctrlbit, this is always on
 */
@@ -88,6 +78,7 @@ struct clk clk_fout_mpll = {
 struct clk clk_fout_epll = {
 	.name		= "fout_epll",
 	.id		= -1,
+	.parent		= &clk_ext_xtal_mux,
 	.ctrlbit	= (1 << 31),
 };
 
@@ -114,28 +105,6 @@ static struct clk *clk_src_apll_list[] = {
 struct clksrc_sources clk_src_apll = {
 	.sources	= clk_src_apll_list,
 	.nr_sources	= ARRAY_SIZE(clk_src_apll_list),
-};
-
-/* Possible clock sources for BPLL Mux */
-static struct clk *clk_src_bpll_list[] = {
-	[0] = &clk_fin_bpll,
-	[1] = &clk_fout_bpll,
-};
-
-struct clksrc_sources clk_src_bpll = {
-	.sources	= clk_src_bpll_list,
-	.nr_sources	= ARRAY_SIZE(clk_src_bpll_list),
-};
-
-/* Possible clock sources for CPLL Mux */
-static struct clk *clk_src_cpll_list[] = {
-	[0] = &clk_fin_cpll,
-	[1] = &clk_fout_cpll,
-};
-
-struct clksrc_sources clk_src_cpll = {
-	.sources	= clk_src_cpll_list,
-	.nr_sources	= ARRAY_SIZE(clk_src_cpll_list),
 };
 
 /* Possible clock sources for MPLL Mux */
@@ -251,6 +220,7 @@ static struct clk *s5p_clks[] __initdata = {
 	&clk_fout_vpll,
 	&clk_vpll,
 	&clk_xusbxti,
+	&clk_xxti,
 };
 
 void __init s5p_register_clocks(unsigned long xtal_freq)

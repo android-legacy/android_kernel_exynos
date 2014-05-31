@@ -18,7 +18,6 @@
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/gpio.h>
-#include <linux/module.h>
 
 #include <sound/soc.h>
 #include <sound/pcm_params.h>
@@ -482,14 +481,24 @@ static __devexit int s3c24xx_iis_dev_remove(struct platform_device *pdev)
 
 static struct platform_driver s3c24xx_iis_driver = {
 	.probe  = s3c24xx_iis_dev_probe,
-	.remove = __devexit_p(s3c24xx_iis_dev_remove),
+	.remove = s3c24xx_iis_dev_remove,
 	.driver = {
 		.name = "s3c24xx-iis",
 		.owner = THIS_MODULE,
 	},
 };
 
-module_platform_driver(s3c24xx_iis_driver);
+static int __init s3c24xx_i2s_init(void)
+{
+	return platform_driver_register(&s3c24xx_iis_driver);
+}
+module_init(s3c24xx_i2s_init);
+
+static void __exit s3c24xx_i2s_exit(void)
+{
+	platform_driver_unregister(&s3c24xx_iis_driver);
+}
+module_exit(s3c24xx_i2s_exit);
 
 /* Module information */
 MODULE_AUTHOR("Ben Dooks, <ben@simtec.co.uk>");

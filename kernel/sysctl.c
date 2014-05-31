@@ -102,6 +102,8 @@ extern char core_pattern[];
 extern unsigned int core_pipe_limit;
 extern int pid_max;
 extern int min_free_kbytes;
+extern int extra_free_kbytes;
+extern int min_free_order_shift;
 extern int pid_max_min, pid_max_max;
 extern int sysctl_drop_caches;
 extern int percpu_pagelist_fraction;
@@ -210,6 +212,50 @@ extern struct ctl_table epoll_table[];
 int sysctl_legacy_va_layout;
 #endif
 
+extern int late_init_android_gadget(int romtype);
+extern int mfc_late_init(void);
+#ifdef CONFIG_CPU_EXYNOS4210
+extern int u1_gps_ntt_init(void);
+#endif
+#ifdef CONFIG_MALI_CONTROL
+extern int register_mali_control(void);
+#endif
+extern int u1_audio_init(void);
+
+int
+rom_feature_set_sysctl(struct ctl_table *table, int write,
+                     void __user *buffer, size_t *lenp,
+                     loff_t *ppos)
+{
+	int error;
+	static int rom_feature_set_save = 0;
+
+	error = proc_dointvec(table, write, buffer, lenp, ppos);
+	if (error)
+		return error;
+
+	if (write) {
+		if ((rom_feature_set & 0x10) == 0x10) {
+			rom_feature_set = rom_feature_set_save;
+#ifdef CONFIG_CPU_EXYNOS4210
+			u1_gps_ntt_init();
+#endif
+			return 0;
+		}
+		rom_feature_set_save = rom_feature_set;
+		printk("Initializing USB with rom_feature_set: %d\n",
+				rom_feature_set);
+		late_init_android_gadget(rom_feature_set);
+#ifdef CONFIG_MALI_CONTROL
+		register_mali_control();
+#endif
+#ifndef CONFIG_CPU_EXYNOS4210
+		mfc_late_init();
+#endif
+		u1_audio_init();
+	}
+	return 0;
+}
 /* The default sysctl tables: */
 
 static struct ctl_table sysctl_base_table[] = {
@@ -262,6 +308,13 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "rom_feature_set",
+		.data		= &rom_feature_set,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= rom_feature_set_sysctl,
 	},
 #ifdef CONFIG_SCHED_DEBUG
 	{
@@ -1197,6 +1250,21 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= min_free_kbytes_sysctl_handler,
 		.extra1		= &zero,
+	},
+	{
+		.procname	= "extra_free_kbytes",
+		.data		= &extra_free_kbytes,
+		.maxlen		= sizeof(extra_free_kbytes),
+		.mode		= 0644,
+		.proc_handler	= min_free_kbytes_sysctl_handler,
+		.extra1		= &zero,
+	},
+	{
+		.procname	= "min_free_order_shift",
+		.data		= &min_free_order_shift,
+		.maxlen		= sizeof(min_free_order_shift),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec
 	},
 	{
 		.procname	= "percpu_pagelist_fraction",

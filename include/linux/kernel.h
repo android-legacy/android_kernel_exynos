@@ -360,6 +360,12 @@ extern int panic_on_unrecovered_nmi;
 extern int panic_on_io_nmi;
 extern int sysctl_panic_on_stackoverflow;
 extern const char *print_tainted(void);
+
+enum lockdep_ok {
+	LOCKDEP_STILL_OK,
+	LOCKDEP_NOW_UNRELIABLE
+};
+
 extern void add_taint(unsigned flag);
 extern int test_taint(unsigned flag);
 extern unsigned long get_taint(void);
@@ -705,6 +711,17 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
 
 extern int do_sysinfo(struct sysinfo *info);
 
+/* To identify board information in panic logs, set this */
+extern char *mach_panic_string;
+
 #endif /* __KERNEL__ */
 
 #endif
+
+#define FEATURE_BIT_ROM 0 //0:Samsung 1:AOSP(CM7|MIUI|Others)
+#define FEATURE_BIT_AOSP_TYPE 1 //1-CM7 0-OtherAOSP|MIUI
+
+#define SAMSUNGROMEXPR ((rom_feature_set & (1<<FEATURE_BIT_ROM) ) == 0)
+#define SAMSUNGROM if( SAMSUNGROMEXPR )
+#define AOSPROM if( (rom_feature_set & (1<<FEATURE_BIT_ROM) )== (1<<FEATURE_BIT_ROM) )
+#define CYANOGENMOD if( (rom_feature_set & (1<<FEATURE_BIT_AOSP_TYPE) ) == (1<<FEATURE_BIT_AOSP_TYPE) )

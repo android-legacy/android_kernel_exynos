@@ -557,24 +557,8 @@ static void __usbhid_submit_report(struct hid_device *hid, struct hid_report *re
 			 * no race because the URB is blocked under
 			 * spinlock
 			 */
-			if (time_after(jiffies, usbhid->last_out + HZ * 5)) {
-				usb_block_urb(usbhid->urbout);
-				/* drop lock to not deadlock if the callback is called */
-				spin_unlock(&usbhid->lock);
+			if (time_after(jiffies, usbhid->last_out + HZ * 5))
 				usb_unlink_urb(usbhid->urbout);
-				spin_lock(&usbhid->lock);
-				usb_unblock_urb(usbhid->urbout);
-				/*
-				 * if the unlinking has already completed
-				 * the pump will have been stopped
-				 * it must be restarted now
-				 */
-				if (!test_bit(HID_OUT_RUNNING, &usbhid->iofl))
-					if (!irq_out_pump_restart(hid))
-						set_bit(HID_OUT_RUNNING, &usbhid->iofl);
-
-
-			}
 		}
 		return;
 	}
@@ -621,22 +605,8 @@ static void __usbhid_submit_report(struct hid_device *hid, struct hid_report *re
 		 * no race because the URB is blocked under
 		 * spinlock
 		 */
-		if (time_after(jiffies, usbhid->last_ctrl + HZ * 5)) {
-			usb_block_urb(usbhid->urbctrl);
-			/* drop lock to not deadlock if the callback is called */
-			spin_unlock(&usbhid->lock);
+		if (time_after(jiffies, usbhid->last_ctrl + HZ * 5))
 			usb_unlink_urb(usbhid->urbctrl);
-			spin_lock(&usbhid->lock);
-			usb_unblock_urb(usbhid->urbctrl);
-			/*
-			 * if the unlinking has already completed
-			 * the pump will have been stopped
-			 * it must be restarted now
-			 */
-			if (!test_bit(HID_CTRL_RUNNING, &usbhid->iofl))
-				if (!ctrl_pump_restart(hid))
-					set_bit(HID_CTRL_RUNNING, &usbhid->iofl);
-		}
 	}
 }
 

@@ -49,6 +49,8 @@ struct mnt_namespace;
 
 struct vfsmount {
 	struct dentry *mnt_root;	/* root of the mounted tree */
+	struct vfsmount *mnt_parent;	/* fs we are mounted on */
+	struct dentry *mnt_mountpoint;	/* dentry of mountpoint */
 	struct super_block *mnt_sb;	/* pointer to superblock */
 	int mnt_flags;
 };

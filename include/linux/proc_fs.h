@@ -114,6 +114,8 @@ struct proc_dir_entry *proc_create_data(const char *name, umode_t mode,
 				void *data);
 extern void remove_proc_entry(const char *name, struct proc_dir_entry *parent);
 
+extern void *PDE_DATA(const struct inode *);
+
 struct pid_namespace;
 
 extern int pid_ns_prepare_proc(struct pid_namespace *ns);
@@ -290,4 +292,5 @@ static inline struct net *PDE_NET(struct proc_dir_entry *pde)
 	return pde->parent->data;
 }
 
+//static inline void *PDE_DATA(const struct inode *inode) {BUG(); return NULL;}
 #endif /* _LINUX_PROC_FS_H */

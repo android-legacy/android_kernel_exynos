@@ -591,8 +591,6 @@ static int __devinit sdhci_s3c_probe(struct platform_device *pdev)
 	if (pdata->host_caps)
 		host->mmc->caps |= pdata->host_caps;
 
-	if (pdata->host_caps2)
-		host->mmc->caps2 |= pdata->host_caps2;
 
 	pm_runtime_enable(&pdev->dev);
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);

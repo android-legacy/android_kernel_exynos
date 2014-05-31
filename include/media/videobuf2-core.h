@@ -64,13 +64,19 @@ struct vb2_mem_ops {
 	void		*(*get_userptr)(void *alloc_ctx, unsigned long vaddr,
 					unsigned long size, int write);
 	void		(*put_userptr)(void *buf_priv);
-
+	int		(*export_dmabuf)(void *alloc_ctx, void *buf_priv,
+						int *export_fd);
 	void		*(*vaddr)(void *buf_priv);
 	void		*(*cookie)(void *buf_priv);
+	void		*(*attach_dmabuf)(void *alloc_ctx,
+						struct dma_buf *dbuf);
+	void		(*detach_dmabuf)(void *buf_priv);
 
 	unsigned int	(*num_users)(void *buf_priv);
 
 	int		(*mmap)(void *buf_priv, struct vm_area_struct *vma);
+	void		(*map_dmabuf)(void *buf_priv);
+	void		(*unmap_dmabuf)(void *buf_priv);
 };
 
 struct vb2_plane {

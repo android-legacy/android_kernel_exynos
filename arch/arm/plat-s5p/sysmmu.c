@@ -11,7 +11,6 @@
 #include <linux/io.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
-#include <linux/export.h>
 
 #include <asm/pgtable.h>
 

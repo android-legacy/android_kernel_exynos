@@ -116,8 +116,10 @@ static int ehci_octeon_drv_probe(struct platform_device *pdev)
 	 * We can DMA from anywhere. But the descriptors must be in
 	 * the lower 4GB.
 	 */
-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 	pdev->dev.dma_mask = &ehci_octeon_dma_mask;
+	ret = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+	if (ret)
+		return ret;
 
 	hcd = usb_create_hcd(&ehci_octeon_hc_driver, &pdev->dev, "octeon");
 	if (!hcd)
@@ -155,9 +157,7 @@ static int ehci_octeon_drv_probe(struct platform_device *pdev)
 	/* cache this readonly data; minimize chip reads */
 	ehci->hcs_params = ehci_readl(ehci, &ehci->caps->hcs_params);
 
-	ehci_reset(ehci);
-
-	ret = usb_add_hcd(hcd, irq, IRQF_SHARED);
+	ret = usb_add_hcd(hcd, irq, IRQF_DISABLED | IRQF_SHARED);
 	if (ret) {
 		dev_dbg(&pdev->dev, "failed to add hcd with err %d\n", ret);
 		goto err3;

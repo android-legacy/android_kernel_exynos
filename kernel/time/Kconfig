@@ -33,3 +33,8 @@ config GENERIC_CLOCKEVENTS_BUILD
 
 config GENERIC_CLOCKEVENTS_MIN_ADJUST
 	bool
+
+# Selectable by architectures which want to reuse the clocksource as
+# sched_clock
+config HAVE_CLKSRC_SCHED_CLOCK
+       bool

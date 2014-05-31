@@ -17,6 +17,7 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 
+#define MEMBLOCK_ERROR	0
 #define INIT_MEMBLOCK_REGIONS	128
 
 struct memblock_region {
@@ -242,7 +243,7 @@ static inline unsigned long memblock_region_reserved_end_pfn(const struct memblo
 #else
 static inline phys_addr_t memblock_alloc(phys_addr_t size, phys_addr_t align)
 {
-	return 0;
+	return MEMBLOCK_ERROR;
 }
 
 #endif /* CONFIG_HAVE_MEMBLOCK */

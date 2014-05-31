@@ -38,6 +38,19 @@ struct gen_pool {
 	int min_alloc_order;		/* minimum allocation order */
 };
 
+unsigned long __must_check
+gen_pool_alloc_aligned(struct gen_pool *pool, size_t size,
+		       unsigned alignment_order);
+
+/**
+ *  * gen_pool_alloc() - allocate special memory from the pool
+ *   * @pool:	Pool to allocate from.
+ *    * @size:	Number of bytes to allocate from the pool.
+ *     *
+ *      * Allocate the requested number of bytes from the specified pool.
+ *       * Uses a first-fit algorithm.
+ *        */
+
 /*
  *  General purpose special memory pool chunk descriptor.
  */

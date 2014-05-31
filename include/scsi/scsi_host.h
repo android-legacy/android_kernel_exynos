@@ -343,6 +343,16 @@ struct scsi_host_template {
 	int (*proc_info)(struct Scsi_Host *, char *, char **, off_t, int, int);
 
 	/*
+ * 	 * Can be used to export driver statistics and other infos to the
+ * 	 	 * world outside the kernel ie. userspace and it also provides an
+ * 	 	 	 * interface to feed the driver with information.
+ * 	 	 	 	 *
+ * 	 	 	 	 	 * Status: OBSOLETE
+ * 	 	 	 	 	 	 */
+	int (*show_info)(struct seq_file *, struct Scsi_Host *);
+	int (*write_info)(struct Scsi_Host *, char *, int);
+
+	/*
 	 * This is an optional routine that allows the transport to become
 	 * involved when a scsi io timer fires. The return value tells the
 	 * timer routine how to finish the io timeout handling:
@@ -731,7 +741,9 @@ struct Scsi_Host {
 	 * Needed just in case we have virtual hosts.
 	 */
 	struct device *dma_dev;
-
+#ifdef CONFIG_USB_HOST_NOTIFY
+	unsigned int  by_usb;
+#endif
 	/*
 	 * We should ensure that this is aligned, both for better performance
 	 * and also because some compilers (m68k) don't automatically force

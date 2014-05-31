@@ -19,7 +19,24 @@ struct local_timer_ops {
 	void (*stop)(struct clock_event_device *);
 };
 
+irqreturn_t percpu_timer_handler(int irq, void *dev_id);
+
 #ifdef CONFIG_LOCAL_TIMERS
+#ifdef CONFIG_HAVE_ARM_TWD
+
+#include "smp_twd.h"
+
+#define local_timer_ack()       twd_timer_ack()
+
+#else
+
+/*
+ * Platform provides this to acknowledge a local timer IRQ.
+ * Returns true if the local timer IRQ is to be processed.
+ */
+int local_timer_ack(void);
+
+#endif
 /*
  * Register a local timer driver
  */

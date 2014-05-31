@@ -49,14 +49,14 @@ struct cpuidle_state {
 	unsigned int    disable;
 
 	int (*enter)	(struct cpuidle_device *dev,
-			struct cpuidle_driver *drv,
-			int index);
+			 struct cpuidle_state *state);
 
 	int (*enter_dead) (struct cpuidle_device *dev, int index);
 };
 
 /* Idle State Flags */
 #define CPUIDLE_FLAG_TIME_VALID	(0x01) /* is residency time measurable? */
+#define CPUIDLE_FLAG_COUPLED	(0x02) /* state applies to multiple cpus */
 
 #define CPUIDLE_DRIVER_FLAGS_MASK (0xFFFF0000)
 
@@ -94,12 +94,20 @@ struct cpuidle_device {
 
 	int			last_residency;
 	int			state_count;
+	struct cpuidle_state	states[CPUIDLE_STATE_MAX];
 	struct cpuidle_state_usage	states_usage[CPUIDLE_STATE_MAX];
 	struct cpuidle_state_kobj *kobjs[CPUIDLE_STATE_MAX];
-
+	struct cpuidle_state	*last_state;
 	struct list_head 	device_list;
 	struct kobject		kobj;
 	struct completion	kobj_unregister;
+	struct cpuidle_state	*safe_state;
+
+#ifdef CONFIG_ARCH_NEEDS_CPU_IDLE_COUPLED
+	int			safe_state_index;
+	cpumask_t		coupled_cpus;
+	struct cpuidle_coupled	*coupled;
+#endif
 };
 
 DECLARE_PER_CPU(struct cpuidle_device *, cpuidle_devices);
@@ -174,6 +182,10 @@ static inline int cpuidle_wrap_enter(struct cpuidle_device *dev,
 { return -ENODEV; }
 static inline int cpuidle_play_dead(void) {return -ENODEV; }
 
+#endif
+
+#ifdef CONFIG_ARCH_NEEDS_CPU_IDLE_COUPLED
+void cpuidle_coupled_parallel_barrier(struct cpuidle_device *dev, atomic_t *a);
 #endif
 
 /******************************

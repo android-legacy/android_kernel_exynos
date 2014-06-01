@@ -22,7 +22,7 @@
 
 #include <plat/cpu.h>
 
-static struct exynos_dvfs_info *exynos_info;
+struct exynos_dvfs_info *exynos_info;
 
 static struct regulator *arm_regulator;
 static struct cpufreq_freqs freqs;

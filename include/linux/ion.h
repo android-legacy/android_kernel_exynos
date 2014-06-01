@@ -40,6 +40,11 @@ enum ion_heap_type {
 	ION_HEAP_TYPE_DMA,
 	ION_HEAP_TYPE_CUSTOM, /* must be last so device specific heaps always
 				 are at the end of this enum */
+#ifdef CONFIG_ION_EXYNOS
+	ION_HEAP_TYPE_EXYNOS_CONTIG,
+	ION_HEAP_TYPE_EXYNOS,
+	ION_HEAP_TYPE_EXYNOS_USER,
+#endif
 	ION_NUM_HEAPS = 16,
 };
 
@@ -47,7 +52,11 @@ enum ion_heap_type {
 #define ION_HEAP_SYSTEM_CONTIG_MASK	(1 << ION_HEAP_TYPE_SYSTEM_CONTIG)
 #define ION_HEAP_CARVEOUT_MASK		(1 << ION_HEAP_TYPE_CARVEOUT)
 #define ION_HEAP_TYPE_DMA_MASK		(1 << ION_HEAP_TYPE_DMA)
-
+#ifdef CONFIG_ION_EXYNOS
+#define ION_HEAP_EXYNOS_USER_MASK	(1 << ION_HEAP_TYPE_EXYNOS_USER)
+#define ION_EXYNOS_NONCACHE_MASK	(1 << (BITS_PER_LONG - 2))
+#define ION_EXYNOS_WRITE_MASK		(1 << (BITS_PER_LONG - 1))
+#endif
 #define ION_NUM_HEAP_IDS		sizeof(unsigned int) * 8
 
 /**
@@ -128,6 +137,7 @@ void ion_reserve(struct ion_platform_data *data);
  * @heap_type_mask:	mask of heaps this client can allocate from
  * @name:		used for debugging
  */
+
 struct ion_client *ion_client_create(struct ion_device *dev,
 				     const char *name);
 
@@ -241,6 +251,106 @@ int ion_share_dma_buf_fd(struct ion_client *client, struct ion_handle *handle);
  * another exporter is passed in this function will return ERR_PTR(-EINVAL)
  */
 struct ion_handle *ion_import_dma_buf(struct ion_client *client, int fd);
+
+/**
+ * ion_map_dma - create a dma mapping for a given handle
+ * @client:	the client
+ * @handle:	handle to map
+ *
+ * Return an sglist describing the given handle
+ */
+struct scatterlist *ion_map_dma(struct ion_client *client,
+				struct ion_handle *handle);
+
+/**
+ * ion_unmap_dma() - destroy a dma mapping for a handle
+ * @client:	the client
+ * @handle:	handle to unmap
+ */
+void ion_unmap_dma(struct ion_client *client, struct ion_handle *handle);
+
+/**
+ * ion_share() - given a handle, obtain a buffer to pass to other clients
+ * @client:	the client
+ * @handle:	the handle to share
+ *
+ * Given a handle, return a buffer, which exists in a global name
+ * space, and can be passed to other clients.  Should be passed into ion_import
+ * to obtain a new handle for this buffer.
+ *
+ * NOTE: This function does do not an extra reference.  The burden is on the
+ * caller to make sure the buffer doesn't go away while it's being passed to
+ * another client.  That is, ion_free should not be called on this handle until
+ * the buffer has been imported into the other client.
+ */
+struct ion_buffer *ion_share(struct ion_client *client,
+			     struct ion_handle *handle);
+
+/**
+ * ion_import() - given an buffer in another client, import it
+ * @client:	this blocks client
+ * @buffer:	the buffer to import (as obtained from ion_share)
+ *
+ * Given a buffer, add it to the client and return the handle to use to refer
+ * to it further.  This is called to share a handle from one kernel client to
+ * another.
+ */
+struct ion_handle *ion_import(struct ion_client *client,
+			      struct ion_buffer *buffer);
+
+/**
+ * ion_share_fd() - given a handle, obtain a buffer(fd) to pass to userspace
+ * @client:	the client
+ * @handle:	the handle to share
+ *
+ * Given a handle, return a fd of a buffer which can be passed to userspace.
+ * Should be passed into userspace or ion_import_fd to obtain a new handle for
+ * this buffer.
+ */
+int ion_share_fd(struct ion_client *client, struct ion_handle *handle);
+
+/**
+ * ion_import_fd() - given an fd obtained via ION_IOC_SHARE ioctl, import it
+ * @client:	this blocks client
+ * @fd:		the fd
+ *
+ * A helper function for drivers that will be recieving ion buffers shared
+ * with them from userspace.  These buffers are represented by a file
+ * descriptor obtained as the return from the ION_IOC_SHARE ioctl.
+ * This function coverts that fd into the underlying buffer, and returns
+ * the handle to use to refer to it further.
+ */
+struct ion_handle *ion_import_fd(struct ion_client *client, int fd);
+
+/**
+ * ion_import_uva() - given a virtual address from user, that is mmapped on an
+ *                    fd obtained via ION_IOCTL_SHARE ioctl, import it
+ * @client:    this blocks client
+ * @uva:       virtual address in userspace.
+ * @offset:	How many bytes are distant from the beginning of the ION buffer
+ *
+ * A helper function for drivers that will be recieving ion buffers shared
+ * with them from userspace.  These buffers are represented by a virtual
+ * address that is mmaped on a file descriptor obtained as the return from the
+ * ION_IOC_SHARE ioctl.
+ * This function does same job with ion_import_fd().
+ */
+struct ion_handle *ion_import_uva(struct ion_client *client, unsigned long uva,
+								off_t *offset);
+
+#ifdef CONFIG_ION_EXYNOS
+struct ion_handle *ion_exynos_get_user_pages(struct ion_client *client,
+			unsigned long uvaddr, size_t len, unsigned int flags);
+#else
+#include <linux/err.h>
+static inline struct ion_handle *ion_exynos_get_user_pages(
+				struct ion_client *client, unsigned long uvaddr,
+				size_t len, unsigned int flags)
+{
+	return ERR_PTR(-ENOSYS);
+}
+#endif
+
 
 #endif /* __KERNEL__ */
 

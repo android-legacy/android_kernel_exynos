@@ -18,6 +18,9 @@
 #include <linux/notifier.h>
 #include <linux/sysfs.h>
 
+int lock_policy_rwsem_write(int cpu);
+void unlock_policy_rwsem_write(int cpu);
+
 /*********************************************************************
  *                        CPUFREQ INTERFACE                          *
  *********************************************************************/

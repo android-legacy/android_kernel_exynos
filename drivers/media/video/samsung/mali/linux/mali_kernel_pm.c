@@ -24,6 +24,7 @@
 #include <linux/version.h>
 #include <asm/current.h>
 #include <linux/suspend.h>
+#include <linux/module.h>
 
 #include <plat/cpu.h>
 #include <plat/pd.h>

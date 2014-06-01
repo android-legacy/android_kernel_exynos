@@ -348,7 +348,7 @@ static int ion_exynos_heap_map_user(struct ion_heap *heap,
 	pgoff = vma->vm_pgoff;
 	start = vma->vm_start;
 	map_pages = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
-	vma->vm_flags |= VM_RESERVED;
+	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
 
 	for_each_sg(sgt->sgl, sgl, sgt->orig_nents, i) {
 		unsigned long sg_pgnum = sg_dma_len(sgl) >> PAGE_SHIFT;
@@ -487,8 +487,10 @@ static int ion_exynos_contig_heap_allocate(struct ion_heap *heap,
 	}
 
 	buffer->flags = flags;
+#ifdef CONFIG_ION_EXYNOS_CONTIGHEAP_DEBUG
 	printk(KERN_INFO "[ION] alloc: 0x%x\n",
 		(unsigned int)buffer->priv_phys);
+#endif
 
 	return 0;
 }
@@ -503,8 +505,10 @@ static void ion_exynos_contig_heap_free(struct ion_buffer *buffer)
 #endif
 
 	ret = cma_free(buffer->priv_phys);
+#ifdef CONFIG_ION_EXYNOS_CONTIGHEAP_DEBUG
 	printk(KERN_INFO "[ION] free: 0x%x, [0x%x]\n",
 		(unsigned int)buffer->priv_phys, ret);
+#endif
 }
 
 static int ion_exynos_contig_heap_phys(struct ion_heap *heap,

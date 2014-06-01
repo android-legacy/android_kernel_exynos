@@ -104,6 +104,8 @@ struct ion_handle {
 	struct ion_buffer *buffer;
 	struct rb_node node;
 	unsigned int kmap_cnt;
+	unsigned int dmap_cnt;
+	unsigned int usermap_cnt;
 	int id;
 };
 
@@ -548,6 +550,38 @@ void ion_free(struct ion_client *client, struct ion_handle *handle)
 }
 EXPORT_SYMBOL(ion_free);
 
+static void ion_client_get(struct ion_client *client);
+static int ion_client_put(struct ion_client *client);
+
+static bool _ion_map(int *buffer_cnt, int *handle_cnt)
+{
+	bool map;
+
+	BUG_ON(*handle_cnt != 0 && *buffer_cnt == 0);
+
+	if (*buffer_cnt)
+		map = false;
+	else
+		map = true;
+	if (*handle_cnt == 0)
+		(*buffer_cnt)++;
+	(*handle_cnt)++;
+	return map;
+}
+
+static bool _ion_unmap(int *buffer_cnt, int *handle_cnt)
+{
+	BUG_ON(*handle_cnt == 0);
+	(*handle_cnt)--;
+	if (*handle_cnt != 0)
+		return false;
+	BUG_ON(*buffer_cnt == 0);
+	(*buffer_cnt)--;
+	if (*buffer_cnt == 0)
+		return true;
+	return false;
+}
+
 int ion_phys(struct ion_client *client, struct ion_handle *handle,
 	     ion_phys_addr_t *addr, size_t *len)
 {
@@ -656,6 +690,42 @@ void *ion_map_kernel(struct ion_client *client, struct ion_handle *handle)
 }
 EXPORT_SYMBOL(ion_map_kernel);
 
+struct scatterlist *ion_map_dma(struct ion_client *client,
+				struct ion_handle *handle)
+{
+	struct ion_buffer *buffer;
+	struct scatterlist *sglist;
+
+	mutex_lock(&client->lock);
+	if (!ion_handle_validate(client, handle)) {
+		pr_err("%s: invalid handle passed to map_dma.\n",
+		       __func__);
+		mutex_unlock(&client->lock);
+		return ERR_PTR(-EINVAL);
+	}
+	buffer = handle->buffer;
+	mutex_lock(&buffer->lock);
+
+	if (!handle->buffer->heap->ops->map_dma) {
+		pr_err("%s: map_kernel is not implemented by this heap.\n",
+		       __func__);
+		mutex_unlock(&buffer->lock);
+		mutex_unlock(&client->lock);
+		return ERR_PTR(-ENODEV);
+	}
+	if (_ion_map(&buffer->dmap_cnt, &handle->dmap_cnt)) {
+		sglist = buffer->heap->ops->map_dma(buffer->heap, buffer);
+		if (IS_ERR_OR_NULL(sglist))
+			_ion_unmap(&buffer->dmap_cnt, &handle->dmap_cnt);
+		buffer->sglist = sglist;
+	} else {
+		sglist = buffer->sglist;
+	}
+	mutex_unlock(&buffer->lock);
+	mutex_unlock(&client->lock);
+	return sglist;
+}
+
 void ion_unmap_kernel(struct ion_client *client, struct ion_handle *handle)
 {
 	struct ion_buffer *buffer;
@@ -668,6 +738,113 @@ void ion_unmap_kernel(struct ion_client *client, struct ion_handle *handle)
 	mutex_unlock(&client->lock);
 }
 EXPORT_SYMBOL(ion_unmap_kernel);
+
+void ion_unmap_dma(struct ion_client *client, struct ion_handle *handle)
+{
+	struct ion_buffer *buffer;
+
+	mutex_lock(&client->lock);
+	buffer = handle->buffer;
+	mutex_lock(&buffer->lock);
+	if (_ion_unmap(&buffer->dmap_cnt, &handle->dmap_cnt)) {
+		buffer->heap->ops->unmap_dma(buffer->heap, buffer);
+		buffer->sglist = NULL;
+	}
+	mutex_unlock(&buffer->lock);
+	mutex_unlock(&client->lock);
+}
+
+
+struct ion_buffer *ion_share(struct ion_client *client,
+				 struct ion_handle *handle)
+{
+	bool valid_handle;
+
+	mutex_lock(&client->lock);
+	valid_handle = ion_handle_validate(client, handle);
+	mutex_unlock(&client->lock);
+	if (!valid_handle) {
+		WARN("%s: invalid handle passed to share.\n", __func__);
+		return ERR_PTR(-EINVAL);
+	}
+
+	/* do not take an extra reference here, the burden is on the caller
+	 * to make sure the buffer doesn't go away while it's passing it
+	 * to another client -- ion_free should not be called on this handle
+	 * until the buffer has been imported into the other client
+	 */
+	return handle->buffer;
+}
+
+struct ion_handle *ion_import(struct ion_client *client,
+			      struct ion_buffer *buffer)
+{
+	struct ion_handle *handle = NULL;
+
+	mutex_lock(&client->lock);
+	/* if a handle exists for this buffer just take a reference to it */
+	handle = ion_handle_lookup(client, buffer);
+	if (!IS_ERR_OR_NULL(handle)) {
+		ion_handle_get(handle);
+		goto end;
+	}
+	handle = ion_handle_create(client, buffer);
+	if (IS_ERR_OR_NULL(handle))
+		goto end;
+	ion_handle_add(client, handle);
+end:
+	mutex_unlock(&client->lock);
+	return handle;
+}
+
+static const struct file_operations ion_share_fops;
+
+int ion_share_fd(struct ion_client *client, struct ion_handle *handle)
+{
+	int fd = get_unused_fd();
+	struct file *filp;
+	struct ion_buffer *buffer;
+
+	if (fd < 0)
+		return fd;
+
+	buffer = ion_share(client, handle);
+	if (IS_ERR(buffer))
+		goto err;
+
+	filp = anon_inode_getfile("ion_share_fd", &ion_share_fops, buffer,
+				O_RDWR);
+	if (IS_ERR_OR_NULL(filp))
+		goto err;
+
+	ion_buffer_get(buffer);
+	fd_install(fd, filp);
+	return fd;
+err:
+	put_unused_fd(fd);
+	return -ENFILE;
+}
+
+struct ion_handle *ion_import_fd(struct ion_client *client, int fd)
+{
+	struct file *file = fget(fd);
+	struct ion_handle *handle;
+
+	if (!file) {
+		pr_err("%s: imported fd not found in file table.\n", __func__);
+		return ERR_PTR(-EINVAL);
+	}
+	if (file->f_op != &ion_share_fops) {
+		pr_err("%s: imported file is not a shared ion file.\n",
+		       __func__);
+		handle = ERR_PTR(-EINVAL);
+		goto end;
+	}
+	handle = ion_import(client, file->private_data);
+end:
+	fput(file);
+	return handle;
+}
 
 static int ion_debug_client_show(struct seq_file *s, void *unused)
 {

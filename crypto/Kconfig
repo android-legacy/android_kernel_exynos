@@ -30,6 +30,15 @@ config CRYPTO_FIPS
 	  certification.  You should say no unless you know what
 	  this is.
 
+config CRYPTO_FIPS_INTEG_OFFSET
+	hex "FIPS integrity check zImage offset"
+        default 0x20000000
+        help
+          This options sets the offset from stext address where
+          zImage will be copied for integrity check if you want
+          to system to operate in FIPS mode, which enables
+	  kernel crypto module.
+
 config CRYPTO_ALGAPI
 	tristate
 	select CRYPTO_ALGAPI2
